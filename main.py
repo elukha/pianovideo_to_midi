@@ -89,12 +89,12 @@ class App:
             self.start_button["state"] = "normal"
 
         #現在のディレクトリを取得
-        self.working_dir = os.getcwd() + "\\images\\"
+        self.images_dir = os.getcwd() + "\\images\\"
         print(self.filename)
-        print(self.working_dir)
+        print(self.images_dir)
 
         #すでに存在する画像を削除
-        self.check_dir = pathlib.Path(self.working_dir)
+        self.check_dir = pathlib.Path(self.images_dir)
         for file in self.check_dir.iterdir():
             if file.is_file():
                 file.unlink()
@@ -111,7 +111,7 @@ class App:
         self.label_fps["text"] = f"fps: {self.avg_fps}"
 
         #ffmpegのコマンドを設定
-        self.ffmpeg_command = f'ffmpeg -i "{self.filename}" -vcodec png "{self.working_dir}%03d.png"'
+        self.ffmpeg_command = f'ffmpeg -i "{self.filename}" -vcodec png "{self.images_dir}%01d.png"'
         subprocess.call(self.ffmpeg_command, shell=True)
         
         time.sleep(0.1)
@@ -141,7 +141,16 @@ class Setting_position(tk.Toplevel):
         self.geometry("500x500")
         # 親との結び付け（任意）
         self.transient(master)     # タスクバーに別表示しない
-        self.grab_set()       
+        self.grab_set()
+
+        #キャンバスの作成
+        self.canvas = tk.Canvas(self, bg="gray", height=300, width=400)
+        self.canvas.place(x=10, y=10)
+
+        #イメージ作成
+        images_path = os.getcwd() + "\\images\\"
+        self.img = tk.PhotoImage(0, 0, file=images_path+"1.png", anchor=tk.NW) #1フレーム目を表示
+
 
 
 if __name__ == "__main__":
