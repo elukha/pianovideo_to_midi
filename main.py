@@ -41,7 +41,7 @@ class App:
         self.reset_button.place(x=320, y=10)
 
         #鍵盤の位置を設定するウィンドウを開くボタン
-        self.set_keyboard_position_button = tk.Button(text="鍵盤の位置を指定", command="")
+        self.set_keyboard_position_button = tk.Button(text="鍵盤の位置を指定", command=self.open_Setting_position)
         self.set_keyboard_position_button.place(x=10, y=50)
 
         #動画から画像に変換ボタン
@@ -95,9 +95,9 @@ class App:
 
         #すでに存在する画像を削除
         self.check_dir = pathlib.Path(self.working_dir)
-        for file in self.check_dir.iterdir():
-            if file.is_file():
-                file.unlink()
+        for self.file in self.check_dir.iterdir():
+            if self.file.is_file():
+                self.file.unlink()
 
 
         #動画情報をピックアップ (解像度、フレームレート)
@@ -122,6 +122,26 @@ class App:
 
         #変換終了のポップアップ
         messagebox.showinfo("infomation", "変換が正常に終了しました")
+
+
+    def open_Setting_position(self):
+        # 既に開いている場合はフォーカス
+        if hasattr(self, "setting_win") and self.setting_win.winfo_exists():
+            self.setting_win.lift()
+            self.setting_win.focus_set()
+            return
+        # 親(self.root)を持つ Toplevel を生成
+        self.setting_win = Setting_position(self.root)
+
+
+class Setting_position(tk.Toplevel):
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("Setting_position")
+        self.geometry("500x500")
+        # 親との結び付け（任意）
+        self.transient(master)     # タスクバーに別表示しない
+        self.grab_set()       
 
 
 if __name__ == "__main__":
