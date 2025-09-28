@@ -95,9 +95,9 @@ class App:
 
         #すでに存在する画像を削除
         self.check_dir = pathlib.Path(self.working_dir)
-        for self.file in self.check_dir.iterdir():
-            if self.file.is_file():
-                self.file.unlink()
+        for file in self.check_dir.iterdir():
+            if file.is_file():
+                file.unlink()
 
 
         #動画情報をピックアップ (解像度、フレームレート)
