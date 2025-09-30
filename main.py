@@ -138,19 +138,21 @@ class Setting_position(tk.Toplevel):
     def __init__(self, master):
         super().__init__(master)
         self.title("Setting_position")
-        self.geometry("500x500")
+        self.geometry("2200x1200")
         # 親との結び付け（任意）
         self.transient(master)     # タスクバーに別表示しない
         self.grab_set()
 
         #キャンバスの作成
-        self.canvas = tk.Canvas(self, bg="gray", height=300, width=400)
+        self.canvas = tk.Canvas(self, bg="gray", height=2100, width=1100)
         self.canvas.place(x=10, y=10)
 
-        #イメージ作成
+        #1枚目の画像を開く
         images_path = os.getcwd() + "\\images\\"
-        self.img = tk.PhotoImage(0, 0, file=images_path+"1.png", anchor=tk.NW) #1フレーム目を表示
+        self.canvas.photo = tk.PhotoImage(file=images_path+"1.png")
 
+        #画像を表示
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.canvas.photo)
 
 
 if __name__ == "__main__":
