@@ -7,6 +7,7 @@ import os
 from tkinter import messagebox
 import time
 import pathlib
+from PIL import Image, ImageTk
 
 
 class App:
@@ -137,22 +138,65 @@ class App:
 class Setting_position(tk.Toplevel):
     def __init__(self, master):
         super().__init__(master)
+        #ウィンドウ設定
         self.title("Setting_position")
-        self.geometry("2200x1200")
-        # 親との結び付け（任意）
+        self.geometry("1000x700")
+        # 親との結び付け
         self.transient(master)     # タスクバーに別表示しない
         self.grab_set()
 
         #キャンバスの作成
-        self.canvas = tk.Canvas(self, bg="gray", height=2100, width=1100)
+        self.canvas_height=400
+        self.canvas_width=800
+        self.canvas = tk.Canvas(self, bg="lightgray", height=self.canvas_height, width=self.canvas_width)
         self.canvas.place(x=10, y=10)
 
-        #1枚目の画像を開く
-        images_path = os.getcwd() + "\\images\\"
-        self.canvas.photo = tk.PhotoImage(file=images_path+"1.png")
+        #変換前の画像のパスを取得
+        images_path =f"{os.getcwd()}\\images\\1.png"
+        
+        #変換した画像を変数に格納
+        resized_image = self._resize_image(images_path)
+        
+        if resized_image:
+            #画像を表示
+            self.canvas.create_image(self.canvas_width / 2, self.canvas_height / 2, anchor=tk.CENTER, image=resized_image)
+            
+            self.canvas.image = resized_image
 
-        #画像を表示
-        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.canvas.photo)
+            #スライダーの作成
+            self.scale = tk.Scale(self, from_=0, to=100)
+    
+
+    def _resize_image(self, image_path):
+        try:
+            pil_image = Image.open(image_path)
+            image_width, image_height = pil_image.size
+
+            #幅と高さの縮小率を計算
+            width_ratio = self.canvas_width / image_width
+            height_ratio = self.canvas_height / image_height
+            #小さいほうの縮小率を使用
+            ratio = min(width_ratio, height_ratio)
+
+            #画像の縮小後のサイズを計算
+            new_width = int(image_width * ratio)
+            new_height = int(image_height * ratio)
+
+            #Pillowで画像をリサイズ
+            resized_pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+            #tkinter用の形式に変換
+            resized_tk_image = ImageTk.PhotoImage(resized_pil_image)
+
+            return resized_tk_image
+        
+        except FileNotFoundError:
+            messagebox.showerror("error", "動画を画像に変換してください")
+            return None
+        except Exception as e:
+            messagebox.showerror("error", f"予期せぬエラーが発生しました({{e}})")
+            return None
+
 
 
 if __name__ == "__main__":
