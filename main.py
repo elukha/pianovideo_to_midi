@@ -146,25 +146,32 @@ class Setting_position(tk.Toplevel):
         self.grab_set()
 
         #キャンバスの作成
-        self.canvas_height=400
+        self.canvas_height=450
         self.canvas_width=800
         self.canvas = tk.Canvas(self, bg="lightgray", height=self.canvas_height, width=self.canvas_width)
         self.canvas.place(x=10, y=10)
 
-        #変換前の画像のパスを取得
-        images_path =f"{os.getcwd()}\\images\\1.png"
+        #変換前の画像のディレクトリパスを取得
+        images_dir =f"{os.getcwd()}\\images"
         
         #変換した画像を変数に格納
-        resized_image = self._resize_image(images_path)
+        resized_image = self._resize_image(f"{images_dir}\\1.png")
         
+        #変換に成功したときだけ実行
         if resized_image:
             #画像を表示
             self.canvas.create_image(self.canvas_width / 2, self.canvas_height / 2, anchor=tk.CENTER, image=resized_image)
-            
             self.canvas.image = resized_image
 
+            #ディレクトリをpathlib形式に変換
+            pathlib_images_dir = pathlib.Path(images_dir)
+
+            #ファイル数(フレーム数)をカウント
+            total_frames = sum(1 for item in pathlib_images_dir.iterdir() if item.is_file())
+
             #スライダーの作成
-            self.scale = tk.Scale(self, from_=0, to=100)
+            self.scale = tk.Scale(self, from_=0, to=total_frames, orient=tk.HORIZONTAL, length=800, troughcolor="skyblue")
+            self.scale.place(x=10, y=470)
     
 
     def _resize_image(self, image_path):
@@ -192,9 +199,11 @@ class Setting_position(tk.Toplevel):
         
         except FileNotFoundError:
             messagebox.showerror("error", "動画を画像に変換してください")
+            self.destroy()
             return None
         except Exception as e:
             messagebox.showerror("error", f"予期せぬエラーが発生しました({{e}})")
+            self.destroy()
             return None
 
 
