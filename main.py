@@ -135,6 +135,7 @@ class App:
         self.setting_win = Setting_position(self.root)
 
 
+
 class Setting_position(tk.Toplevel):
     def __init__(self, master):
         super().__init__(master)
@@ -152,29 +153,34 @@ class Setting_position(tk.Toplevel):
         self.canvas.place(x=10, y=10)
 
         #変換前の画像のディレクトリパスを取得
-        images_dir =f"{os.getcwd()}\\images"
+        self.images_dir =f"{os.getcwd()}\\images"
         
         #変換した画像を変数に格納
-        resized_image = self._resize_image(f"{images_dir}\\1.png")
+        resized_image = self.resize_image(f"{self.images_dir}\\1.png")
         
         #変換に成功したときだけ実行
         if resized_image:
-            #画像を表示
-            self.canvas.create_image(self.canvas_width / 2, self.canvas_height / 2, anchor=tk.CENTER, image=resized_image)
+            #画像を表示, 画像のIDを保存(画像更新時に使用)
+            self.image_id = self.canvas.create_image(self.canvas_width / 2, self.canvas_height / 2, anchor=tk.CENTER, image=resized_image)
             self.canvas.image = resized_image
 
+            #画像を最背面に設定
+            self.canvas.lower(self.image_id)
+
             #ディレクトリをpathlib形式に変換
-            pathlib_images_dir = pathlib.Path(images_dir)
+            pathlib_images_dir = pathlib.Path(self.images_dir)
 
             #ファイル数(フレーム数)をカウント
             total_frames = sum(1 for item in pathlib_images_dir.iterdir() if item.is_file())
 
             #スライダーの作成
-            self.scale = tk.Scale(self, from_=0, to=total_frames, orient=tk.HORIZONTAL, length=800, troughcolor="skyblue")
+            self.scale = tk.Scale(self, from_=1, to=total_frames, orient=tk.HORIZONTAL, length=800, troughcolor="skyblue", command=self.update_image)
             self.scale.place(x=10, y=470)
+
+        self.C3_box = DraggableRectangle(self.canvas, 20, 20, 30, 30, "red")
     
 
-    def _resize_image(self, image_path):
+    def resize_image(self, image_path):
         try:
             pil_image = Image.open(image_path)
             image_width, image_height = pil_image.size
@@ -198,7 +204,7 @@ class Setting_position(tk.Toplevel):
             return resized_tk_image
         
         except FileNotFoundError:
-            messagebox.showerror("error", "動画を画像に変換してください")
+            messagebox.showerror("error", "画像ファイルが見つかりません。\n動画を画像に変換してください")
             self.destroy()
             return None
         except Exception as e:
@@ -206,6 +212,54 @@ class Setting_position(tk.Toplevel):
             self.destroy()
             return None
 
+    
+    def update_image(self, val):
+        path = f"{self.images_dir}\\{val}.png"
+        resized_image = self.resize_image(path)
+        #現在の画像を置き換え
+        self.canvas.itemconfig(self.image_id, image=resized_image)
+        self.canvas.image = resized_image
+        self.canvas.lower(self.image_id)
+ 
+
+
+class DraggableRectangle:
+    def __init__(self, canvas, x, y, width, height, color):
+        self.canvas = canvas
+        self.item = canvas.create_rectangle(x, y, x+width, y+height, fill=color)
+        self.canvas.tag_bind(self.item, '<Button-1>', self.on_press)
+        self.canvas.tag_bind(self.item, '<B1-Motion>', self.on_drag)
+
+    def on_press(self, event):
+        self.start_x = event.x
+        self.start_y = event.y
+
+    def on_drag(self, event):
+        dx = event.x - self.start_x
+        dy = event.y - self.start_y
+
+        x1, y1, x2, y2 = self.canvas.coords(self.item)
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+
+        # 新しい座標がキャンバスの範囲内かチェックし、移動量を調整
+        if x1 + dx < 0:
+            dx = -x1
+        if y1 + dy < 0:
+            dy = -y1
+        if x2 + dx > canvas_width:
+            dx = canvas_width - x2
+        if y2 + dy > canvas_height:
+            dy = canvas_height - y2
+
+        self.canvas.move(self.item, dx, dy)
+        self.start_x = event.x
+        self.start_y = event.y
+
+    def get_position(self):
+        position = self.canvas.coords(self.item)
+        print(f"position: {position}")
+        return position
 
 
 if __name__ == "__main__":
