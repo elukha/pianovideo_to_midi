@@ -250,13 +250,22 @@ class Setting_position(tk.Toplevel):
 
 
     def add_keys(self):
+        #最初にユーザーが指定した座標ブロックをcanvasから隠す
+        if self.C4_box:
+            self.canvas.itemconfig(self.C4_box.item, state="hidden")
+            self.canvas.itemconfig(self.C4_Sharp_box.item, state="hidden")
+            self.canvas.itemconfigure(self.B4_box.item, state="hidden")
+
         C_x, C_y = self.C4_box.get_position()
         _, C_Sharp_y = self.C4_Sharp_box.get_position()
         B_x, _ = self.B4_box.get_position()
         
         octave=4
         keys=["C", "C_Sharp", "D", "D_Sharp", "E", "E_None", "F", "F_Sharp", "G", "G_Sharp", "A", "A_Sharp", "B"]
-        t = len(keys) #鍵盤の数
+        t = len(keys) - 1 #鍵盤の数
+
+        #推定した鍵盤のクラスを保存する辞書
+        self.all_dragable_keys = {}
 
         #鍵盤の座標を計算
         for i, note in enumerate(keys):
@@ -267,12 +276,24 @@ class Setting_position(tk.Toplevel):
             if note == f"E_None_{octave}":
                 pass
             #シャープはy座標が違うため分岐
-            elif (note == f"C_Sharp_{octave}") or (note == f"D_Sharp_{octave}") or (note == f"F_Sharp_{octave}") or (note == f"G_Sharp_{octave}") or (note == f"A_Sharp_{octave}"):
+            elif "_Sharp" in note:
                 position = [x, C_Sharp_y]
                 self.key_positions[note] = position
+
+                #辞書に保存
+                x1_s = x - (6 / 2) #center_x - (width / 2)
+                y1_s = C_Sharp_y - (15 / 2) #center_y - (height / 2)
+                self.all_dragable_keys[f"{note}_{octave}"] = DraggableRectangle(self.canvas, x1_s, y1_s, 6, 15, "gray")
+
+
             else: #白鍵の場合の処理
                 position = [x, C_y]
                 self.key_positions[note] = position
+
+                #辞書に保存
+                x1 = x - (7 / 2) #center_x - (width / 2)
+                y1 = C_y - (15 / 2)
+                self.all_dragable_keys[f"{note}_{octave}"] = DraggableRectangle(self.canvas, x1, y1, 7, 15, "gray")
 
         print(self.key_positions)
 
