@@ -146,22 +146,28 @@ class Setting_position(tk.Toplevel):
         self.transient(master)     # タスクバーに別表示しない
         self.grab_set()
 
+        #鍵盤の座標を保存する辞書
+        self.key_positions = {}
+
         #キャンバスの作成
         self.canvas_height=450
         self.canvas_width=800
-        self.canvas = tk.Canvas(self, bg="lightgray", height=self.canvas_height, width=self.canvas_width)
+        self.canvas = tk.Canvas(self, bg="lightgray", height=self.canvas_height, width=self.canvas_width, highlightthickness=0, borderwidth=0)
         self.canvas.place(x=10, y=10)
 
         #変換前の画像のディレクトリパスを取得
         self.images_dir =f"{os.getcwd()}\\images"
         
         #変換した画像を変数に格納
-        resized_image = self.resize_image(f"{self.images_dir}\\1.png")
+        resized_image, new_width, new_height = self.resize_image(f"{self.images_dir}\\1.png")
         
         #変換に成功したときだけ実行
         if resized_image:
+            #canvasのサイズを画像と合わせる
+            self.canvas.config(width=new_width, height=new_height)
+
             #画像を表示, 画像のIDを保存(画像更新時に使用)
-            self.image_id = self.canvas.create_image(self.canvas_width / 2, self.canvas_height / 2, anchor=tk.CENTER, image=resized_image)
+            self.image_id = self.canvas.create_image(new_width / 2, new_height / 2, anchor=tk.CENTER, image=resized_image)
             self.canvas.image = resized_image
 
             #画像を最背面に設定
@@ -175,9 +181,30 @@ class Setting_position(tk.Toplevel):
 
             #スライダーの作成
             self.scale = tk.Scale(self, from_=1, to=total_frames, orient=tk.HORIZONTAL, length=800, troughcolor="skyblue", command=self.update_image)
-            self.scale.place(x=10, y=470)
+            self.scale.place(x=10, y=500)
 
-        self.C3_box = DraggableRectangle(self.canvas, 20, 20, 30, 30, "red")
+        #座標指定のlabel設定
+        color_info_label1 = tk.Label(self, text="赤", font=20, fg="red")
+        color_info_label2 = tk.Label(self, text=":C4,", font=20)
+        color_info_label3 = tk.Label(self, text="緑", font=20, fg="green")
+        color_info_label4 = tk.Label(self, text=":C4#,", font=20)
+        color_info_label5 = tk.Label(self, text="青", font=20,fg="blue")
+        color_info_label6 = tk.Label(self, text=":B4に移動してください", font=20)
+        color_info_label1.place(x=20, y=470)
+        color_info_label2.place(x=45, y=470)
+        color_info_label3.place(x=90, y=470)
+        color_info_label4.place(x=115, y=470)
+        color_info_label5.place(x=160, y=470)
+        color_info_label6.place(x=185, y=470)
+
+        #座標を指定するウィジェットを追加
+        self.C4_box = DraggableRectangle(self.canvas, 20, 20, 7, 15, "red")
+        self.C4_Sharp_box = DraggableRectangle(self.canvas, 30, 20, 6, 15, "green")
+        self.B4_box = DraggableRectangle(self.canvas, 40, 20, 7, 15, "blue")
+
+        #自動で鍵盤の座標を補充するボタン
+        self.add_key = tk.Button(self, text="鍵盤を自動追加", command=self.add_keys)
+        self.add_key.place(x=20, y=580)
     
 
     def resize_image(self, image_path):
@@ -201,7 +228,7 @@ class Setting_position(tk.Toplevel):
             #tkinter用の形式に変換
             resized_tk_image = ImageTk.PhotoImage(resized_pil_image)
 
-            return resized_tk_image
+            return resized_tk_image, new_width, new_height
         
         except FileNotFoundError:
             messagebox.showerror("error", "画像ファイルが見つかりません。\n動画を画像に変換してください")
@@ -215,12 +242,41 @@ class Setting_position(tk.Toplevel):
     
     def update_image(self, val):
         path = f"{self.images_dir}\\{val}.png"
-        resized_image = self.resize_image(path)
+        resized_image, _, _ = self.resize_image(path)
         #現在の画像を置き換え
         self.canvas.itemconfig(self.image_id, image=resized_image)
         self.canvas.image = resized_image
         self.canvas.lower(self.image_id)
- 
+
+
+    def add_keys(self):
+        C_x, C_y = self.C4_box.get_position()
+        _, C_Sharp_y = self.C4_Sharp_box.get_position()
+        B_x, _ = self.B4_box.get_position()
+        
+        octave=4
+        keys=["C", "C_Sharp", "D", "D_Sharp", "E", "E_None", "F", "F_Sharp", "G", "G_Sharp", "A", "A_Sharp", "B"]
+        t = len(keys) #鍵盤の数
+
+        #鍵盤の座標を計算
+        for i, note in enumerate(keys):
+            note = note + "_" + str(octave)
+            x = (1 - (i / t)) * C_x + ((i / t) * B_x) #線形補完で座標を計算
+
+            #Eの半音上はないのでスキップ
+            if note == f"E_None_{octave}":
+                pass
+            #シャープはy座標が違うため分岐
+            elif (note == f"C_Sharp_{octave}") or (note == f"D_Sharp_{octave}") or (note == f"F_Sharp_{octave}") or (note == f"G_Sharp_{octave}") or (note == f"A_Sharp_{octave}"):
+                position = [x, C_Sharp_y]
+                self.key_positions[note] = position
+            else: #白鍵の場合の処理
+                position = [x, C_y]
+                self.key_positions[note] = position
+
+        print(self.key_positions)
+
+
 
 
 class DraggableRectangle:
@@ -258,8 +314,10 @@ class DraggableRectangle:
 
     def get_position(self):
         position = self.canvas.coords(self.item)
-        print(f"position: {position}")
-        return position
+        #ブロックの中央の座標を計算
+        x = (position[0] + position[2]) / 2
+        y = (position[1] + position[3]) / 2
+        return x, y
 
 
 if __name__ == "__main__":
