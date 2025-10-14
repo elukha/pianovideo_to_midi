@@ -8,6 +8,7 @@ from tkinter import messagebox
 import time
 import pathlib
 from PIL import Image, ImageTk
+import pretty_midi
 
 
 class App:
@@ -16,6 +17,15 @@ class App:
         self.root = tk.Tk()
         self.root.title("Pianorole to MIDI")
         self.root.geometry("600x600")
+
+        #鍵盤の座標と色のしきい値を格納する辞書を初期化
+        self.key_positions = {}
+        
+        #画像ディレクトリの取得
+        self.images_dir = os.getcwd() + "\\images\\"
+
+        #色の差の許容範囲 (0-765の値, 30程度を推奨)
+        self.color_tolerance = 30
         
         self.create_widget()
 
@@ -32,23 +42,36 @@ class App:
         self.label_fps.place(x=120, y=70)
 
         #ファイル参照関連
-        self.entry_box = tk.Entry(width=40, state="readonly")
+        self.entry_box = tk.Entry(self.root, width=40, state="readonly")
         self.entry_box.place(x=10, y=10)
         
-        self.file_dir_button = tk.Button(text="mp4参照", command=self.open_file, width=7)
+        self.file_dir_button = tk.Button(self.root, text="mp4参照", command=self.open_file, width=7)
         self.file_dir_button.place(x=260, y=10)
 
-        self.reset_button = tk.Button(text="リセット", command=self.reset_file, width=4, bg="orange")
+        self.reset_button = tk.Button(self.root, text="リセット", command=self.reset_file, width=4, bg="orange")
         self.reset_button.place(x=320, y=10)
 
+        #動画から画像に変換ボタン
+        self.video_to_image_button = tk.Button(self.root, text="動画を画像に変換", command=self.video_to_image)
+        self.video_to_image_button.place(x=10, y=50)
+        
         #鍵盤の位置を設定するウィンドウを開くボタン
-        self.set_keyboard_position_button = tk.Button(text="鍵盤の位置を指定", command=self.open_Setting_position)
+        self.set_keyboard_position_button = tk.Button(self.root, text="鍵盤の位置を指定", command=self.open_Setting_position)
         self.set_keyboard_position_button.place(x=10, y=90)
 
-        #動画から画像に変換ボタン
-        self.start_button = tk.Button(text="動画を画像に変換", command=self.video_to_image)
-        self.start_button.place(x=10, y=50)
+        #分析開始ボタン
+        self.detect_notes_button = tk.Button(self.root, text="MIDI化開始", command=self.detect_notes)
+        self.detect_notes_button.place(x=10, y=130)
 
+        #色の差の許容範囲のスライダー
+        self.scale = tk.Scale(self.root, from_=0, to=765, length=400, orient=tk.HORIZONTAL, label="色の差の許容範囲(30を推奨)", command=self.color_tolerance_setting)
+        self.scale.place(x=10, y=170)
+        self.scale.set(30) #初期値を設定
+
+
+    def color_tolerance_setting(self, value):
+        #色の差の許容範囲 (0-765の値, 30程度を推奨)
+        self.color_tolerance = int(value)
 
 
     def open_file(self):
@@ -76,23 +99,14 @@ class App:
 
 
     def video_to_image(self):
-        #実行中はボタンを無効化
-        self.start_button["text"] = "変換中..."
-        self.start_button["state"] = "disable"
-
-
         try:
             self.video_info = ffmpeg.probe(self.filename) #ffmpegで動画情報を取得
         except:
             #エラー時はポップアップし、ボタンを戻す
             messagebox.showerror("Error", "ファイルが選択されていません")
-            self.start_button["text"] = "動画を画像に変換"
-            self.start_button["state"] = "normal"
-
-        #現在のディレクトリを取得
-        self.images_dir = os.getcwd() + "\\images\\"
-        print(self.filename)
-        print(self.images_dir)
+            self.video_to_image_button["text"] = "動画を画像に変換"
+            self.video_to_image_button["state"] = "normal"
+            return
 
         #すでに存在する画像を削除
         self.check_dir = pathlib.Path(self.images_dir)
@@ -100,11 +114,13 @@ class App:
             if file.is_file():
                 file.unlink()
 
-
         #動画情報をピックアップ (解像度、フレームレート)
-        self.width = self.video_info["streams"][0]["width"]
-        self.height = self.video_info["streams"][0]["height"]
-        self.fps = self.video_info["streams"][0]["avg_frame_rate"]
+        for stream in self.video_info['streams']:
+            if stream['codec_type'] == 'video':
+                self.width = stream['width']
+                self.height = stream["height"]
+                self.fps = stream["avg_frame_rate"]
+                break
         self.avg_fps = float(Fraction(self.fps)) #平均のfpsを計算
         
         #guiの動画情報を更新
@@ -114,23 +130,17 @@ class App:
         #ffmpegのコマンドを設定
         self.ffmpeg_command = f'ffmpeg -i "{self.filename}" -vcodec png "{self.images_dir}%01d.png"'
         subprocess.call(self.ffmpeg_command, shell=True)
-        
-        time.sleep(0.1)
-
-        #ボタンを元に戻す
-        self.start_button["text"] = "動画を画像に変換"
-        self.start_button["state"] = "active"
 
         #変換終了のポップアップ
         messagebox.showinfo("infomation", "変換が正常に終了しました")
 
 
     def detect_notes(self):
-        if not self.video_info:
+        if not hasattr(self, "video_info"):
             try: #動画情報がないときに、情報を取得する
                 self.video_info = ffmpeg.probe(self.filename)
-                self.start_button["text"] = "動画を画像に変換"
-                self.start_button["state"] = "normal"
+                self.video_to_image_button["text"] = "動画を画像に変換"
+                self.video_to_image_button["state"] = "normal"
                 self.width = self.video_info["streams"][0]["width"]
                 self.height = self.video_info["streams"][0]["height"]
                 self.fps = self.video_info["streams"][0]["avg_frame_rate"]
@@ -138,9 +148,115 @@ class App:
             except:
                 #エラー時はポップアップし、ボタンを戻す
                 messagebox.showerror("Error", "ファイルが選択されていません")
-
+                return
         
+        #各鍵盤の状態をフレームごとに保存する辞書を定義
+        if not hasattr(self, "key_positions") or not self.key_positions:
+            messagebox.showerror("error", "座標または色のしきい値が指定されていません")
+            return
+        self.note_states = {key: [] for key in self.key_positions.keys()}
 
+        #ディレクトリ内のすべてのファイルをリストに入れる
+        pathlib_img_dir = pathlib.Path(self.images_dir)
+        files = os.listdir(pathlib_img_dir)
+        sorted_files = sorted(files, key=lambda f: int(os.path.splitext(f)[0]))
+        print(sorted_files)
+
+        #各フレームを開く
+        for image_file_name in sorted_files:
+            print(f"image_file_name:{image_file_name}")
+            img = Image.open(f"images\\{image_file_name}")
+            #画像をRGBモードに変換
+            rgb_img = img.convert("RGB")
+            print(f"self.key_position:{self.key_positions}")
+            for key, data in self.key_positions.items():
+                print(f"key:{key}, data:{data}")
+                #現在のフレームの色を取得
+                now_position = data["position"]
+                print(f"now_position:{now_position}")
+                r, g, b = rgb_img.getpixel(now_position)
+                print(f"r:{r}, g:{g}, b:{b}")
+
+                #しきい値とフレームの色の差を計算
+                diff = abs((r + g + b) - (data["color"][0] + data["color"][1] + data["color"][2]))
+                a = data["color"][0] + data["color"][1] + data["color"][2]
+                print(f"{diff} = {(r + g + b)} - {a}")
+                
+                #差が許容範囲を超えたらTrue
+                is_pressed = diff > self.color_tolerance
+                print(f"{is_pressed} = {diff} > {self.color_tolerance}")
+                self.note_states[key].append(is_pressed)
+        print(self.note_states)
+        self.create_midi()
+
+
+    def create_midi(self):
+        is_playing = False
+        start_frame = 0
+ 
+        #音名とMIDIノート番号の対応辞書
+        piano_notes = {
+            'A_0': 21, 'A_Sharp_0': 22, 'B_0': 23,
+            'C_1': 24, 'C_Sharp_1': 25, 'D_1': 26, 'D_Sharp_1': 27, 'E_1': 28, 'F_1': 29, 'F_Sharp_1': 30, 'G_1': 31, 'G_Sharp_1': 32, 'A_1': 33, 'A_Sharp_1': 34, 'B_1': 35,
+            'C_2': 36, 'C_Sharp_2': 37, 'D_2': 38, 'D_Sharp_2': 39, 'E_2': 40, 'F_2': 41, 'F_Sharp_2': 42, 'G_2': 43, 'G_Sharp_2': 44, 'A_2': 45, 'A_Sharp_2': 46, 'B_2': 47,
+            'C_3': 48, 'C_Sharp_3': 49, 'D_3': 50, 'D_Sharp_3': 51, 'E_3': 52, 'F_3': 53, 'F_Sharp_3': 54, 'G_3': 55, 'G_Sharp_3': 56, 'A_3': 57, 'A_Sharp_3': 58, 'B_3': 59,
+            'C_4': 60, 'C_Sharp_4': 61, 'D_4': 62, 'D_Sharp_4': 63, 'E_4': 64, 'F_4': 65, 'F_Sharp_4': 66, 'G_4': 67, 'G_Sharp_4': 68, 'A_4': 69, 'A_Sharp_4': 70, 'B_4': 71,
+            'C_5': 72, 'C_Sharp_5': 73, 'D_5': 74, 'D_Sharp_5': 75, 'E_5': 76, 'F_5': 77, 'F_Sharp_5': 78, 'G_5': 79, 'G_Sharp_5': 80, 'A_5': 81, 'A_Sharp_5': 82, 'B_5': 83,
+            'C_6': 84, 'C_Sharp_6': 85, 'D_6': 86, 'D_Sharp_6': 87, 'E_6': 88, 'F_6': 89, 'F_Sharp_6': 90, 'G_6': 91, 'G_Sharp_6': 92, 'A_6': 93, 'A_Sharp_6': 94, 'B_6': 95,
+            'C_7': 96, 'C_Sharp_7': 97, 'D_7': 98, 'D_Sharp_7': 99, 'E_7': 100, 'F_7': 101, 'F_Sharp_7': 102, 'G_7': 103, 'G_Sharp_7': 104, 'A_7': 105, 'A_Sharp_7': 106, 'B_7': 107,
+            'C_8': 108
+            }
+        
+        #prettyMIDIオブジェクト作成
+        midi_data = pretty_midi.PrettyMIDI()
+
+        #Instrumentオブジェクト作成(ピアノ)
+        piano_program = pretty_midi.instrument_name_to_program('Acoustic Grand Piano')
+        piano = pretty_midi.Instrument(program=piano_program)
+
+        #音の強さ(0~127の範囲)
+        velocity = 100
+
+        #辞書のキーで回す
+        for key in self.note_states:
+            print(f"key:{key}")
+            #キーのリストで回す
+            for frame_index, is_pressed in enumerate(self.note_states[key]):
+                frame_index += 1
+                #リストがTrueになったとき
+                if is_pressed and not is_playing:
+                    is_playing = True
+                    start_frame = frame_index
+
+                #リストがFalseになったとき
+                elif not is_pressed and is_playing:
+                    is_playing = False
+                    end_frame = frame_index
+
+                    #開始時間とTrueの間の長さ
+                    start_time = start_frame / self.avg_fps
+                    duration = abs((end_frame - start_frame) / self.avg_fps)
+                    end_time = start_time + duration
+
+                    #Noteを作成
+                    note = pretty_midi.Note(
+                        velocity=velocity,
+                        pitch=piano_notes[key],
+                        start=start_time,
+                        end = end_time
+                    )
+
+                    #作成したNoteをInstrumentに追加
+                    piano.notes.append(note)
+        
+        #InstrumentをPrettyMIDIオブジェクトに追加
+        midi_data.instruments.append(piano)
+
+        #MIDIファイルを出力
+        output_path = "sample.mid"
+        midi_data.write(output_path)
+
+        messagebox.showinfo("infomation", "MIDI出力に成功しました")
         
 
     def open_Setting_position(self):
@@ -150,19 +266,19 @@ class App:
             self.setting_win.focus_set()
             return
         # 親(self.root)を持つ Toplevel を生成
-        self.setting_win = Setting_position(self.root)
+        self.setting_win = Setting_position(self)
 
 
 
 class Setting_position(tk.Toplevel):
     def __init__(self, master):
-        super().__init__(master)
+        super().__init__(master.root)
         self.app  = master #Appのインスタンスを保存
         #ウィンドウ設定
         self.title("Setting_position")
         self.geometry("1000x700")
         # 親との結び付け
-        self.transient(master)     # タスクバーに別表示しない
+        self.transient(master.root)     # タスクバーに別表示しない
         self.grab_set()
 
         #鍵盤の座標を保存する辞書
@@ -231,15 +347,15 @@ class Setting_position(tk.Toplevel):
         self.add_key = tk.Button(self, text="鍵盤を自動追加", command=self.add_all_octaves)
         self.add_key.place(x=20, y=580)
 
-        #鍵盤の色のしきい値を取得するボタン
+        #座標を確定するボタン
+        self.confirm_positions_button = tk.Button(self, text="座標を確定", command=self.apply_position, bg="coral")
+        self.confirm_positions_button.place(x=20, y=620)
+
+        #しきい値を確定してウィンドウを閉じるボタン
         self.set_threshold_button = tk.Button(self, text="色のしきい値を取得", command=self.set_threshold)
         self.set_threshold_button.place(x=120, y=580)
 
-        #座標としきい値の色を確定するボタン
-        self.confirm_positions_button = tk.Button(self, text="座標を確定", command=self.apply_and_close, bg="coral")
-        self.confirm_positions_button.place(x=20, y=620)
     
-
     def resize_image(self, image_path):
         try:
             self.image_path = image_path
@@ -308,7 +424,9 @@ class Setting_position(tk.Toplevel):
 
     def add_keys(self, octave):
         C_x, C_y = self.C4_box.get_position()
+        self.C_y = C_y
         _, C_Sharp_y = self.C4_Sharp_box.get_position()
+        self.C_Sharp_y = C_Sharp_y
         B_x, _ = self.B4_box.get_position()
         canvas_width = self.canvas.winfo_width()
 
@@ -355,7 +473,6 @@ class Setting_position(tk.Toplevel):
                 x2 = x1 + w
                 # 範囲内のみ追加
                 if 0 <= x1 and x2 <= canvas_width:
-                    self.key_positions[note] = {"position": [x / self.ratio, center_y / self.ratio], "color": None} #縮小前の画像の座標にして辞書に追加
                     self.all_dragable_keys[note] = DraggableRectangle(self.canvas, x1, y1, w, h, "gray")
                 else:
                     # クリーンアップ
@@ -371,7 +488,6 @@ class Setting_position(tk.Toplevel):
                 y1 = center_y - h / 2
                 x2 = x1 + w
                 if 0 <= x1 and x2 <= canvas_width:
-                    self.key_positions[note] = {"position": [x / self.ratio, center_y / self.ratio], "color": None} #縮小前の画像の座標にして辞書に追加
                     self.all_dragable_keys[note] = DraggableRectangle(self.canvas, x1, y1, w, h, "gray")
                 else:
                     self.key_positions.pop(note, None)
@@ -385,28 +501,35 @@ class Setting_position(tk.Toplevel):
     def set_threshold(self):
         if not self.key_positions:
             messagebox.showerror("error", "座標を指定してください")
-        else:
-            for key in self.key_positions:
-                img=Image.open(self.image_path)
-                #画像をRGBモードに変換
-                rgb_img = img.convert("RGB")
-                #指定した座標の色を取得
-                x = self.key_positions[key]["position"][0]
-                y = self.key_positions[key]["position"][1]
-                r, g, b = rgb_img.getpixel((x, y))
-                #辞書にリスト型で色を追加 [r, g, b]
-                self.key_positions[key]["color"] = [r, g, b]
-                print(f"{key}の色は{r, g, b}")
- 
+            return
+        
+        for key in self.key_positions:
+            img=Image.open(self.image_path)
+            #画像をRGBモードに変換
+            rgb_img = img.convert("RGB")
+            #指定した座標の色を取得
+            x = self.key_positions[key]["position"][0]
+            y = self.key_positions[key]["position"][1]
+            r, g, b = rgb_img.getpixel((x, y))
+            #辞書にリスト型で色を追加 [r, g, b]
+            self.key_positions[key]["color"] = [r, g, b]
+        self.app.key_positions = self.key_positions
+        print(f"座標としきい値が確定されました: {self.app.key_positions}")
+        self.destroy()
 
-    def apply_and_close(self):
-        if not self.key_positions:
+
+    def apply_position(self):
+        if not hasattr(self, "all_dragable_keys"):
             messagebox.showerror("error", "座標を指定してください")
         else:
-            self.app.key_positions = self.key_positions #Appに辞書を渡す
-            print(f"座標が確定されました: {self.app.key_positions}")
-            self.destroy()
-        
+            #座標を保存
+            for key in self.all_dragable_keys:
+                x, y = self.all_dragable_keys[key].get_position()
+                if "Sharp" in key:
+                    self.key_positions[key] = {"position": [x / self.ratio, y / self.ratio], "color": None} #縮小前の画像の座標にして辞書に追加
+                else:
+                    self.key_positions[key] = {"position": [x / self.ratio, y / self.ratio], "color": None} #縮小前の画像の座標にして辞書に追加
+
 
 class DraggableRectangle:
     def __init__(self, canvas, x, y, width, height, color):
@@ -450,4 +573,4 @@ class DraggableRectangle:
 
 
 if __name__ == "__main__":
-    App()
+    app=App()
