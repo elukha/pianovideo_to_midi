@@ -26,6 +26,12 @@ class App:
 
         #色の差の許容範囲 (0-765の値, 30程度を推奨)
         self.color_tolerance = 30
+
+        #右手と左手の色を受け取る用
+        self.left_color = None
+        self.right_color = None
+        #2種の色があるモードか
+        self.is_two_color_mode = None
         
         self.create_widget()
 
@@ -136,57 +142,84 @@ class App:
 
 
     def detect_notes(self):
-        if not hasattr(self, "video_info"):
-            try: #動画情報がないときに、情報を取得する
-                self.video_info = ffmpeg.probe(self.filename)
-                self.video_to_image_button["text"] = "動画を画像に変換"
-                self.video_to_image_button["state"] = "normal"
-                self.width = self.video_info["streams"][0]["width"]
-                self.height = self.video_info["streams"][0]["height"]
-                self.fps = self.video_info["streams"][0]["avg_frame_rate"]
-                self.avg_fps = float(Fraction(self.fps)) #平均のfpsを計算
-            except:
-                #エラー時はポップアップし、ボタンを戻す
-                messagebox.showerror("Error", "ファイルが選択されていません")
-                return
+        try: #動画情報を取得する
+            self.video_info = ffmpeg.probe(self.filename) #ffmpegで動画情報を取得
+            #動画情報をピックアップ (解像度、フレームレート)
+            for stream in self.video_info['streams']:
+                if stream['codec_type'] == 'video':
+                    self.width = stream['width']
+                    self.height = stream["height"]
+                    self.fps = stream["avg_frame_rate"]
+                    break
+            self.avg_fps = float(Fraction(self.fps)) #平均のfpsを計算
+        except:
+            #エラー時はポップアップし、ボタンを戻す
+            messagebox.showerror("Error", "ファイルが選択されていません")
+            return
         
         #各鍵盤の状態をフレームごとに保存する辞書を定義
         if not hasattr(self, "key_positions") or not self.key_positions:
             messagebox.showerror("error", "座標または色のしきい値が指定されていません")
             return
-        self.note_states = {key: [] for key in self.key_positions.keys()}
+        if self.is_two_color_mode:
+            self.left_note_states = {key: [] for key in self.key_positions.keys()}
+            self.right_note_states = {key: [] for key in self.key_positions.keys()}
+        else:
+            self.note_states = {key: [] for key in self.key_positions.keys()}
 
         #ディレクトリ内のすべてのファイルをリストに入れる
         pathlib_img_dir = pathlib.Path(self.images_dir)
         files = os.listdir(pathlib_img_dir)
         sorted_files = sorted(files, key=lambda f: int(os.path.splitext(f)[0]))
-        print(sorted_files)
 
         #各フレームを開く
         for image_file_name in sorted_files:
-            print(f"image_file_name:{image_file_name}")
             img = Image.open(f"images\\{image_file_name}")
             #画像をRGBモードに変換
             rgb_img = img.convert("RGB")
-            print(f"self.key_position:{self.key_positions}")
             for key, data in self.key_positions.items():
-                print(f"key:{key}, data:{data}")
                 #現在のフレームの色を取得
                 now_position = data["position"]
-                print(f"now_position:{now_position}")
                 r, g, b = rgb_img.getpixel(now_position)
-                print(f"r:{r}, g:{g}, b:{b}")
 
-                #しきい値とフレームの色の差を計算
-                diff = abs((r + g + b) - (data["color"][0] + data["color"][1] + data["color"][2]))
-                a = data["color"][0] + data["color"][1] + data["color"][2]
-                print(f"{diff} = {(r + g + b)} - {a}")
+                if self.is_two_color_mode:
+                    left_R, left_G, left_B = self.left_color
+                    right_R, right_G, right_B = self.right_color
+
+                    diff_left_R = abs(r - left_R) < self.color_tolerance
+                    diff_left_G = abs(g - left_G) < self.color_tolerance
+                    diff_left_B = abs(b - left_B) < self.color_tolerance
+                    diff_right_R = abs(r - right_R) < self.color_tolerance
+                    diff_right_G = abs(g - right_G) < self.color_tolerance
+                    diff_right_B = abs(b - right_B) < self.color_tolerance
+
+                    print(f"file_path : {image_file_name} ------------------------------")
+                    print(f"key: {key}")
+                    print(f"diff_left_R: {diff_left_R} = {r} - {left_R}({abs(r - left_R)}) < {self.color_tolerance}")
+                    print(f"diff_left_G: {diff_left_G} = {g} - {left_G}({abs(g - left_G)}) < {self.color_tolerance}")
+                    print(f"diff_left_B: {diff_left_B} = {b} - {left_B}({abs(b - left_B)}) < {self.color_tolerance}")
+                    print(f"diff_right_R: {diff_right_R} = {r} - {right_R}({abs(r - right_R)}) < {self.color_tolerance}")
+                    print(f"diff_right_G: {diff_right_G} = {g} - {right_G}({abs(g - right_G)}) < {self.color_tolerance}")
+                    print(f"diff_right_B: {diff_right_B} = {b} - {right_B}({abs(b - right_B)}) < {self.color_tolerance}")
+
+                    if diff_left_R and diff_left_G and diff_left_B:
+                        self.left_note_states[key].append(True)
+                    else:
+                        self.left_note_states[key].append(False)
+
+                    if diff_right_R and diff_right_G and diff_right_B:
+                        self.right_note_states[key].append(True)
+                    else:
+                        self.right_note_states[key].append(False)
+                    
+                else:
+                    #しきい値とフレームの色の差を計算
+                    diff = abs((r + g + b) - (data["color"][0] + data["color"][1] + data["color"][2]))
+                    
+                    #差が許容範囲を超えたらTrue
+                    is_pressed = diff > self.color_tolerance
+                    self.note_states[key].append(is_pressed)
                 
-                #差が許容範囲を超えたらTrue
-                is_pressed = diff > self.color_tolerance
-                print(f"{is_pressed} = {diff} > {self.color_tolerance}")
-                self.note_states[key].append(is_pressed)
-        print(self.note_states)
         self.create_midi()
 
 
@@ -210,53 +243,110 @@ class App:
         #prettyMIDIオブジェクト作成
         midi_data = pretty_midi.PrettyMIDI()
 
-        #Instrumentオブジェクト作成(ピアノ)
         piano_program = pretty_midi.instrument_name_to_program('Acoustic Grand Piano')
-        piano = pretty_midi.Instrument(program=piano_program)
 
         #音の強さ(0~127の範囲)
         velocity = 100
 
-        #辞書のキーで回す
-        for key in self.note_states:
-            print(f"key:{key}")
-            #キーのリストで回す
-            for frame_index, is_pressed in enumerate(self.note_states[key]):
-                frame_index += 1
-                #リストがTrueになったとき
-                if is_pressed and not is_playing:
-                    is_playing = True
-                    start_frame = frame_index
+        #トラックを分ける場合と分けない場合に分岐
+        if self.is_two_color_mode:
+            left_piano = pretty_midi.Instrument(program=piano_program)
+            right_piano = pretty_midi.Instrument(program=piano_program)
 
-                #リストがFalseになったとき
-                elif not is_pressed and is_playing:
-                    is_playing = False
-                    end_frame = frame_index
+            all_note_states = {
+                "left": self.left_note_states,
+                "right": self.right_note_states
+            }
 
-                    #開始時間とTrueの間の長さ
-                    start_time = start_frame / self.avg_fps
-                    duration = abs((end_frame - start_frame) / self.avg_fps)
-                    end_time = start_time + duration
+            for hand in all_note_states:
+                for key in all_note_states[hand]:
+                    #キーのリストで回す
+                    for frame_index, is_pressed in enumerate(all_note_states[hand][key]):
+                        frame_index += 1
+                        #リストがTrueになったとき
+                        if is_pressed and not is_playing:
+                            is_playing = True
+                            start_frame = frame_index
 
-                    #Noteを作成
-                    note = pretty_midi.Note(
-                        velocity=velocity,
-                        pitch=piano_notes[key],
-                        start=start_time,
-                        end = end_time
-                    )
+                        #リストがFalseになったとき
+                        elif not is_pressed and is_playing:
+                            is_playing = False
+                            end_frame = frame_index
 
-                    #作成したNoteをInstrumentに追加
-                    piano.notes.append(note)
-        
-        #InstrumentをPrettyMIDIオブジェクトに追加
-        midi_data.instruments.append(piano)
+                            #開始時間とTrueの間の長さ
+                            start_time = start_frame / self.avg_fps
+                            duration = abs((end_frame - start_frame) / self.avg_fps)
+                            end_time = start_time + duration
 
-        #MIDIファイルを出力
-        output_path = "sample.mid"
-        midi_data.write(output_path)
+                            note = pretty_midi.Note(
+                            velocity=velocity,
+                            pitch=piano_notes[key],
+                            start=start_time,
+                            end = end_time
+                            )
 
-        messagebox.showinfo("infomation", "MIDI出力に成功しました")
+                            #Noteを作成
+                            if hand == "left":
+                                #left_pianoに追加
+                                left_piano.notes.append(note)
+                            else:
+                                #right_pianoに追加
+                                right_piano.notes.append(note)
+            
+            #InstrumentをPrettyMIDIオブジェクトに追加
+            midi_data.instruments.append(left_piano)
+            midi_data.instruments.append(right_piano)
+
+            #MIDIファイルを出力
+            output_path = "sample.mid"
+            midi_data.write(output_path)
+
+            messagebox.showinfo("infomation", "MIDI出力に成功しました")
+
+        else:
+            #Instrumentオブジェクト作成(ピアノ)
+            piano = pretty_midi.Instrument(program=piano_program)
+
+            #辞書のキーで回す
+            for key in self.note_states:
+                print(f"key:{key}")
+                #キーのリストで回す
+                for frame_index, is_pressed in enumerate(self.note_states[key]):
+                    frame_index += 1
+                    #リストがTrueになったとき
+                    if is_pressed and not is_playing:
+                        is_playing = True
+                        start_frame = frame_index
+
+                    #リストがFalseになったとき
+                    elif not is_pressed and is_playing:
+                        is_playing = False
+                        end_frame = frame_index
+
+                        #開始時間とTrueの間の長さ
+                        start_time = start_frame / self.avg_fps
+                        duration = abs((end_frame - start_frame) / self.avg_fps)
+                        end_time = start_time + duration
+
+                        #Noteを作成
+                        note = pretty_midi.Note(
+                            velocity=velocity,
+                            pitch=piano_notes[key],
+                            start=start_time,
+                            end = end_time
+                        )
+
+                        #作成したNoteをInstrumentに追加
+                        piano.notes.append(note)
+            
+            #InstrumentをPrettyMIDIオブジェクトに追加
+            midi_data.instruments.append(piano)
+
+            #MIDIファイルを出力
+            output_path = "sample.mid"
+            midi_data.write(output_path)
+
+            messagebox.showinfo("infomation", "MIDI出力に成功しました")
         
 
     def open_Setting_position(self):
@@ -322,21 +412,21 @@ class Setting_position(tk.Toplevel):
             self.scale.place(x=10, y=500)
 
         #座標指定のlabel設定
-        color_info_label1 = tk.Label(self, text="赤", font=20, fg="red")
-        color_info_label2 = tk.Label(self, text=":C4,", font=20)
-        color_info_label3 = tk.Label(self, text="緑", font=20, fg="green")
-        color_info_label4 = tk.Label(self, text=":C4#,", font=20)
-        color_info_label5 = tk.Label(self, text="青", font=20,fg="blue")
-        color_info_label6 = tk.Label(self, text=":B4に移動してください", font=20)
-        color_info_label1.place(x=20, y=470)
-        color_info_label2.place(x=45, y=470)
-        color_info_label3.place(x=90, y=470)
-        color_info_label4.place(x=115, y=470)
-        color_info_label5.place(x=160, y=470)
-        color_info_label6.place(x=185, y=470)
+        self.color_info_label1 = tk.Label(self, text="赤", font=20, fg="red")
+        self.color_info_label2 = tk.Label(self, text=":C4,", font=20)
+        self.color_info_label3 = tk.Label(self, text="緑", font=20, fg="green")
+        self.color_info_label4 = tk.Label(self, text=":C4#,", font=20)
+        self.color_info_label5 = tk.Label(self, text="青", font=20,fg="blue")
+        self.color_info_label6 = tk.Label(self, text=":B4に移動してください", font=20)
+        self.color_info_label1.place(x=20, y=470)
+        self.color_info_label2.place(x=45, y=470)
+        self.color_info_label3.place(x=90, y=470)
+        self.color_info_label4.place(x=115, y=470)
+        self.color_info_label5.place(x=160, y=470)
+        self.color_info_label6.place(x=185, y=470)
 
-        info_label = tk.Label(self, text="すべての鍵盤が押されてない状態にしてください", font=12)
-        info_label.place(x=20, y=550)
+        self.info_label = tk.Label(self, text="すべての鍵盤が押されてない状態にしてください", font=12)
+        self.info_label.place(x=20, y=550)
 
         #座標を指定するウィジェットを追加
         self.C4_box = DraggableRectangle(self.canvas, 20, 20, 7, 15, "red")
@@ -348,12 +438,17 @@ class Setting_position(tk.Toplevel):
         self.add_key.place(x=20, y=580)
 
         #座標を確定するボタン
-        self.confirm_positions_button = tk.Button(self, text="座標を確定", command=self.apply_position, bg="coral")
+        self.confirm_positions_button = tk.Button(self, text="座標を確定", command=self.apply_position)
         self.confirm_positions_button.place(x=20, y=620)
 
         #しきい値を確定してウィンドウを閉じるボタン
         self.set_threshold_button = tk.Button(self, text="色のしきい値を取得", command=self.set_threshold)
         self.set_threshold_button.place(x=120, y=580)
+
+        #鍵盤の色が2色か指定するチェックボックス
+        self.state_is_two_color_mode = tk.BooleanVar
+        self.checkbox_is_two_color_mode = tk.Checkbutton(self, text="鍵盤の色が2色の時はチェックしてください", font=12)
+        self.checkbox_is_two_color_mode.place(x=450, y=470)
 
     
     def resize_image(self, image_path):
@@ -500,7 +595,7 @@ class Setting_position(tk.Toplevel):
 
     def set_threshold(self):
         if not self.key_positions:
-            messagebox.showerror("error", "座標を指定してください")
+            messagebox.showerror("error", "座標を確定してください")
             return
         
         for key in self.key_positions:
@@ -515,6 +610,54 @@ class Setting_position(tk.Toplevel):
             self.key_positions[key]["color"] = [r, g, b]
         self.app.key_positions = self.key_positions
         print(f"座標としきい値が確定されました: {self.app.key_positions}")
+
+        #鍵盤の色が2種類のときに、色を指定する
+        if self.state_is_two_color_mode:
+            for key in self.all_dragable_keys: #補完した鍵盤の座標をすべて非表示にする
+                self.all_dragable_keys[key].hide()
+        
+            self.left_block = DraggableRectangle(self.canvas, 30, 30, 7, 15, "orange")
+            self.right_block = DraggableRectangle(self.canvas, 50, 30, 7, 15, "purple")
+
+            #labelを変更
+            self.color_info_label1.config(text="橙", fg="orange")
+            self.color_info_label2["text"] = "左手"
+            self.color_info_label3.config(text="紫", fg="purple")
+            self.color_info_label4["text"] = "右手"
+            self.color_info_label5.config(text="に移動してください", fg="black")
+            self.color_info_label6["text"] = ""
+            self.info_label["text"] = "左手と右手の鍵盤が同時に押されてる状態にしてください"
+
+            self.get_two_colors_button = tk.Button(self, text="2つの鍵盤の色を取得して閉じる", bg="coral" ,command=self.get_two_colors)
+            self.get_two_colors_button.place(x=120, y=620)
+
+    
+    def get_two_colors(self):
+        #座標を取得
+        left_position = self.left_block.get_position()
+        right_position = self.right_block.get_position()
+        
+
+        #画像から色を取得
+        img=Image.open(self.image_path)
+        rgb_img = img.convert("RGB")
+        #左の色を取得
+        r_r, r_g, r_b = rgb_img.getpixel((left_position[0] / self.ratio, left_position[1] / self.ratio))
+        self.left_color = [r_r, r_g, r_b]
+        #右の色を取得
+        l_r, l_g, l_b = rgb_img.getpixel((right_position[0] / self.ratio, right_position[1] / self.ratio))
+        self.right_color = [l_r, l_g, l_b]
+        print(f"ratio: {self.ratio}")
+        print(f"left: {left_position[0] / self.ratio}, {left_position[1] / self.ratio}")
+        print(f"right: {right_position[0] / self.ratio}, {right_position[1] / self.ratio}")
+        print(f"filepath:{self.image_path}")
+        print(f"left:{self.left_color}, right: {self.right_color}")
+
+        #Appクラスに左右の色を渡す
+        self.app.left_color = self.left_color
+        self.app.right_color = self.right_color
+        self.app.is_two_color_mode = self.state_is_two_color_mode
+
         self.destroy()
 
 
@@ -541,6 +684,9 @@ class DraggableRectangle:
     def on_press(self, event):
         self.start_x = event.x
         self.start_y = event.y
+
+    def hide(self):
+        self.canvas.itemconfig(self.item, state="hidden")
 
     def on_drag(self, event):
         dx = event.x - self.start_x
