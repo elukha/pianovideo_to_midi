@@ -5,7 +5,6 @@ from fractions import Fraction
 import subprocess
 import os
 from tkinter import messagebox
-import time
 import pathlib
 from PIL import Image, ImageTk
 import pretty_midi
@@ -31,7 +30,7 @@ class App:
         self.left_color = None
         self.right_color = None
         #2種の色があるモードか
-        self.is_two_color_mode = None
+        self.is_two_color_mode = False
         
         self.create_widget()
 
@@ -101,6 +100,9 @@ class App:
         #guiの動画情報をリセット
         self.label_resolusion["text"] = "解像度 -"
         self.label_fps["text"] = "FPS -"
+
+        #動画のpathをリセット
+        self.filename = None
 
 
 
@@ -224,10 +226,7 @@ class App:
 
 
     def create_midi(self):
-        is_playing = False
-        start_frame = 0
- 
-        #音名とMIDIノート番号の対応辞書
+        # 音名とMIDIノート番号の対応辞書
         piano_notes = {
             'A_0': 21, 'A_Sharp_0': 22, 'B_0': 23,
             'C_1': 24, 'C_Sharp_1': 25, 'D_1': 26, 'D_Sharp_1': 27, 'E_1': 28, 'F_1': 29, 'F_Sharp_1': 30, 'G_1': 31, 'G_Sharp_1': 32, 'A_1': 33, 'A_Sharp_1': 34, 'B_1': 35,
@@ -242,114 +241,79 @@ class App:
         
         #prettyMIDIオブジェクト作成
         midi_data = pretty_midi.PrettyMIDI()
-
         piano_program = pretty_midi.instrument_name_to_program('Acoustic Grand Piano')
-
-        #音の強さ(0~127の範囲)
         velocity = 100
 
-        #トラックを分ける場合と分けない場合に分岐
         if self.is_two_color_mode:
             left_piano = pretty_midi.Instrument(program=piano_program)
             right_piano = pretty_midi.Instrument(program=piano_program)
 
-            all_note_states = {
-                "left": self.left_note_states,
-                "right": self.right_note_states
-            }
+            all_note_states = {"left": self.left_note_states, "right": self.right_note_states}
 
-            for hand in all_note_states:
-                for key in all_note_states[hand]:
-                    #キーのリストで回す
-                    for frame_index, is_pressed in enumerate(all_note_states[hand][key]):
-                        frame_index += 1
-                        #リストがTrueになったとき
+            for hand, notes_dict in all_note_states.items():
+                for key, states in notes_dict.items():
+                    is_playing = False
+                    start_frame = 0
+                    for idx, is_pressed in enumerate(states, start=1):
                         if is_pressed and not is_playing:
                             is_playing = True
-                            start_frame = frame_index
-
-                        #リストがFalseになったとき
+                            start_frame = idx
                         elif not is_pressed and is_playing:
                             is_playing = False
-                            end_frame = frame_index
-
-                            #開始時間とTrueの間の長さ
+                            end_frame = idx
                             start_time = start_frame / self.avg_fps
-                            duration = abs((end_frame - start_frame) / self.avg_fps)
-                            end_time = start_time + duration
+                            end_time = end_frame / self.avg_fps
+                            note = pretty_midi.Note(velocity=velocity, pitch=piano_notes[key], start=start_time, end=end_time)
+                            (left_piano if hand == "left" else right_piano).notes.append(note)
+                    # 末尾まで押され続けていた場合
+                    if is_playing:
+                        start_time = start_frame / self.avg_fps
+                        end_time = (len(states) + 1) / self.avg_fps
+                        note = pretty_midi.Note(velocity=velocity, pitch=piano_notes[key], start=start_time, end=end_time)
+                        (left_piano if hand == "left" else right_piano).notes.append(note)
 
-                            note = pretty_midi.Note(
-                            velocity=velocity,
-                            pitch=piano_notes[key],
-                            start=start_time,
-                            end = end_time
-                            )
-
-                            #Noteを作成
-                            if hand == "left":
-                                #left_pianoに追加
-                                left_piano.notes.append(note)
-                            else:
-                                #right_pianoに追加
-                                right_piano.notes.append(note)
-            
-            #InstrumentをPrettyMIDIオブジェクトに追加
             midi_data.instruments.append(left_piano)
             midi_data.instruments.append(right_piano)
-
-            #MIDIファイルを出力
             output_path = "sample.mid"
             midi_data.write(output_path)
-
             messagebox.showinfo("infomation", "MIDI出力に成功しました")
-
         else:
-            #Instrumentオブジェクト作成(ピアノ)
             piano = pretty_midi.Instrument(program=piano_program)
-
-            #辞書のキーで回す
-            for key in self.note_states:
-                print(f"key:{key}")
-                #キーのリストで回す
-                for frame_index, is_pressed in enumerate(self.note_states[key]):
-                    frame_index += 1
-                    #リストがTrueになったとき
+            for key, states in self.note_states.items():
+                is_playing = False
+                start_frame = 0
+                for idx, is_pressed in enumerate(states, start=1):
                     if is_pressed and not is_playing:
                         is_playing = True
-                        start_frame = frame_index
-
-                    #リストがFalseになったとき
+                        start_frame = idx
                     elif not is_pressed and is_playing:
                         is_playing = False
-                        end_frame = frame_index
-
-                        #開始時間とTrueの間の長さ
+                        end_frame = idx
                         start_time = start_frame / self.avg_fps
-                        duration = abs((end_frame - start_frame) / self.avg_fps)
-                        end_time = start_time + duration
-
-                        #Noteを作成
-                        note = pretty_midi.Note(
-                            velocity=velocity,
-                            pitch=piano_notes[key],
-                            start=start_time,
-                            end = end_time
-                        )
-
-                        #作成したNoteをInstrumentに追加
+                        end_time = end_frame / self.avg_fps
+                        note = pretty_midi.Note(velocity=velocity, pitch=piano_notes[key], start=start_time, end=end_time)
                         piano.notes.append(note)
-            
-            #InstrumentをPrettyMIDIオブジェクトに追加
-            midi_data.instruments.append(piano)
+                if is_playing:
+                    start_time = start_frame / self.avg_fps
+                    end_time = (len(states) + 1) / self.avg_fps
+                    note = pretty_midi.Note(velocity=velocity, pitch=piano_notes[key], start=start_time, end=end_time)
+                    piano.notes.append(note)
 
-            #MIDIファイルを出力
+            midi_data.instruments.append(piano)
             output_path = "sample.mid"
             midi_data.write(output_path)
-
             messagebox.showinfo("infomation", "MIDI出力に成功しました")
         
 
     def open_Setting_position(self):
+        test_path = f"{self.images_dir}\\1.png"
+        if os.path.exists(test_path):
+            pass
+        else:
+            messagebox.showerror("error", "画像ファイルが見つかりません。\n動画を画像に変換してください")
+            return
+
+
         # 既に開いている場合はフォーカス
         if hasattr(self, "setting_win") and self.setting_win.winfo_exists():
             self.setting_win.lift()
@@ -415,7 +379,7 @@ class Setting_position(tk.Toplevel):
         self.color_info_label1 = tk.Label(self, text="赤", font=20, fg="red")
         self.color_info_label2 = tk.Label(self, text=":C4,", font=20)
         self.color_info_label3 = tk.Label(self, text="緑", font=20, fg="green")
-        self.color_info_label4 = tk.Label(self, text=":C4#,", font=20)
+        self.color_info_label4 = tk.Label(self, text=":C4#, ", font=20)
         self.color_info_label5 = tk.Label(self, text="青", font=20,fg="blue")
         self.color_info_label6 = tk.Label(self, text=":B4に移動してください", font=20)
         self.color_info_label1.place(x=20, y=470)
@@ -423,7 +387,7 @@ class Setting_position(tk.Toplevel):
         self.color_info_label3.place(x=90, y=470)
         self.color_info_label4.place(x=115, y=470)
         self.color_info_label5.place(x=160, y=470)
-        self.color_info_label6.place(x=185, y=470)
+        self.color_info_label6.place(x=180, y=470)
 
         self.info_label = tk.Label(self, text="すべての鍵盤が押されてない状態にしてください", font=12)
         self.info_label.place(x=20, y=550)
@@ -434,8 +398,8 @@ class Setting_position(tk.Toplevel):
         self.B4_box = DraggableRectangle(self.canvas, 40, 20, 7, 15, "blue")
 
         #自動で鍵盤の座標を補充するボタン
-        self.add_key = tk.Button(self, text="鍵盤を自動追加", command=self.add_all_octaves)
-        self.add_key.place(x=20, y=580)
+        self.add_key_button = tk.Button(self, text="鍵盤を自動追加", command=self.add_all_octaves)
+        self.add_key_button.place(x=20, y=580)
 
         #座標を確定するボタン
         self.confirm_positions_button = tk.Button(self, text="座標を確定", command=self.apply_position)
@@ -446,8 +410,8 @@ class Setting_position(tk.Toplevel):
         self.set_threshold_button.place(x=120, y=580)
 
         #鍵盤の色が2色か指定するチェックボックス
-        self.state_is_two_color_mode = tk.BooleanVar
-        self.checkbox_is_two_color_mode = tk.Checkbutton(self, text="鍵盤の色が2色の時はチェックしてください", font=12)
+        self.state_is_two_color_mode = tk.BooleanVar()
+        self.checkbox_is_two_color_mode = tk.Checkbutton(self, text="鍵盤の色が2色の時はチェックしてください", font=12, variable=self.state_is_two_color_mode)
         self.checkbox_is_two_color_mode.place(x=450, y=470)
 
     
@@ -496,6 +460,8 @@ class Setting_position(tk.Toplevel):
 
 
     def add_all_octaves(self):
+        #ボタンを無効化
+        self.add_key_button["state"] = "disable"
         #移動可能なブロックのクラスを保存する辞書
         self.all_dragable_keys = {}
 
@@ -612,7 +578,7 @@ class Setting_position(tk.Toplevel):
         print(f"座標としきい値が確定されました: {self.app.key_positions}")
 
         #鍵盤の色が2種類のときに、色を指定する
-        if self.state_is_two_color_mode:
+        if self.state_is_two_color_mode.get():
             for key in self.all_dragable_keys: #補完した鍵盤の座標をすべて非表示にする
                 self.all_dragable_keys[key].hide()
         
@@ -621,15 +587,17 @@ class Setting_position(tk.Toplevel):
 
             #labelを変更
             self.color_info_label1.config(text="橙", fg="orange")
-            self.color_info_label2["text"] = "左手"
+            self.color_info_label2["text"] = ":左手"
             self.color_info_label3.config(text="紫", fg="purple")
-            self.color_info_label4["text"] = "右手"
+            self.color_info_label4["text"] = ":右手"
             self.color_info_label5.config(text="に移動してください", fg="black")
-            self.color_info_label6["text"] = ""
+            self.color_info_label6.place_forget()
             self.info_label["text"] = "左手と右手の鍵盤が同時に押されてる状態にしてください"
 
             self.get_two_colors_button = tk.Button(self, text="2つの鍵盤の色を取得して閉じる", bg="coral" ,command=self.get_two_colors)
             self.get_two_colors_button.place(x=120, y=620)
+        else:
+            self.destroy()
 
     
     def get_two_colors(self):
