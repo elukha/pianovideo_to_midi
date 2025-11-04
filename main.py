@@ -36,7 +36,6 @@ class App:
 
         self.root.mainloop()
 
-
     
     def create_widget(self):
         #動画情報表示ラベルの定義
@@ -69,7 +68,7 @@ class App:
         self.detect_notes_button.place(x=10, y=130)
 
         #色の差の許容範囲のスライダー
-        self.scale = tk.Scale(self.root, from_=0, to=765, length=400, orient=tk.HORIZONTAL, label="色の差の許容範囲(30を推奨)", command=self.color_tolerance_setting)
+        self.scale = tk.Scale(self.root, from_=0, to=255, length=400, orient=tk.HORIZONTAL, label="色の差の許容範囲(30を推奨)", command=self.color_tolerance_setting)
         self.scale.place(x=10, y=170)
         self.scale.set(30) #初期値を設定
 
@@ -213,6 +212,9 @@ class App:
                         self.right_note_states[key].append(True)
                     else:
                         self.right_note_states[key].append(False)
+                    
+                    #開いた画像を閉じる
+                    img.close()
                     
                 else:
                     #しきい値とフレームの色の差を計算
@@ -437,6 +439,9 @@ class Setting_position(tk.Toplevel):
 
             #tkinter用の形式に変換
             resized_tk_image = ImageTk.PhotoImage(resized_pil_image)
+            
+            #開いた画像を閉じる
+            pil_image.close()
 
             return resized_tk_image, new_width, new_height
         
@@ -537,7 +542,6 @@ class Setting_position(tk.Toplevel):
                     self.all_dragable_keys[note] = DraggableRectangle(self.canvas, x1, y1, w, h, "gray")
                 else:
                     # クリーンアップ
-                    self.key_positions.pop(note, None)
                     if note in self.all_dragable_keys:
                         self.canvas.delete(self.all_dragable_keys[note].item)
                         self.all_dragable_keys.pop(note, None)
@@ -551,7 +555,6 @@ class Setting_position(tk.Toplevel):
                 if 0 <= x1 and x2 <= canvas_width:
                     self.all_dragable_keys[note] = DraggableRectangle(self.canvas, x1, y1, w, h, "gray")
                 else:
-                    self.key_positions.pop(note, None)
                     if note in self.all_dragable_keys:
                         self.canvas.delete(self.all_dragable_keys[note].item)
                         self.all_dragable_keys.pop(note, None)
@@ -574,6 +577,8 @@ class Setting_position(tk.Toplevel):
             r, g, b = rgb_img.getpixel((x, y))
             #辞書にリスト型で色を追加 [r, g, b]
             self.key_positions[key]["color"] = [r, g, b]
+            #開いた画像を閉じる
+            img.close()
         self.app.key_positions = self.key_positions
         print(f"座標としきい値が確定されました: {self.app.key_positions}")
 
@@ -625,6 +630,9 @@ class Setting_position(tk.Toplevel):
         self.app.left_color = self.left_color
         self.app.right_color = self.right_color
         self.app.is_two_color_mode = self.state_is_two_color_mode
+
+        #開いた画像を閉じる
+        img.close()
 
         self.destroy()
 
