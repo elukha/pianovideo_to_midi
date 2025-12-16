@@ -10,40 +10,86 @@ import pretty_midi
 import threading
 import sys
 import time
+import tempfile
+import shutil
 
 class App:
     def __init__(self):
         # tkinter初期化
         self.root = tk.Tk()
         self.root.title("Pianorole to MIDI")
-        self.root.geometry("600x400")
+        self.root.geometry("600x300")
 
-        # --- exe化を見据えたパス設定 ---
-        if getattr(sys, 'frozen', False):
-            self.base_path = os.path.dirname(sys.executable)
-        else:
-            self.base_path = os.path.dirname(os.path.abspath(__file__))
+        # --- 一時ディレクトリの設定 (権限エラー回避・自動削除) ---
+        self.temp_dir_obj = tempfile.TemporaryDirectory()
+        self.images_dir = self.temp_dir_obj.name
+
+        # --- EXE化用のパス解決ヘルパー ---
+        self.base_path = self.get_base_path()
         
-        # 画像ディレクトリのパス設定
-        self.images_dir = os.path.join(self.base_path, "images")
-
-        # imagesディレクトリが存在しない場合は作成
-        if not os.path.exists(self.images_dir):
-            os.makedirs(self.images_dir)
-
         # メンバ変数の初期化
         self.key_positions = {}
         self.color_tolerance = 30
         self.left_color = None
         self.right_color = None
         self.is_two_color_mode = False
-        self.is_converting_video = False # 動画変換中フラグ
-        self.total_video_frames = 0      # 動画の総フレーム数（概算）
+        self.is_converting_video = False 
+        self.total_video_frames = 0      
         
         self.create_widget()
 
+        # アプリ終了時に一時フォルダを掃除
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.root.mainloop()
 
+    def get_base_path(self):
+        """実行環境（EXEかScriptか）に応じたベースパスを取得"""
+        if getattr(sys, 'frozen', False):
+            return sys._MEIPASS
+        else:
+            return os.path.dirname(os.path.abspath(__file__))
+
+    def get_ffmpeg_path(self):
+        """ffmpegの実行ファイルパスを取得"""
+        bin_name = "ffmpeg.exe" if os.name == 'nt' else "ffmpeg"
+        
+        # 1. EXE同梱 or 開発環境
+        bundled_path = os.path.join(self.base_path, bin_name)
+        if os.path.exists(bundled_path):
+            return bundled_path
+            
+        # 2. EXEと同じフォルダ
+        if getattr(sys, 'frozen', False):
+            exe_dir = os.path.dirname(sys.executable)
+            external_path = os.path.join(exe_dir, bin_name)
+            if os.path.exists(external_path):
+                return external_path
+
+        # 3. PATH環境変数
+        return bin_name
+        
+    def get_ffprobe_path(self):
+        """ffprobeの実行ファイルパスを取得"""
+        bin_name = "ffprobe.exe" if os.name == 'nt' else "ffprobe"
+        
+        bundled_path = os.path.join(self.base_path, bin_name)
+        if os.path.exists(bundled_path):
+            return bundled_path
+            
+        if getattr(sys, 'frozen', False):
+            exe_dir = os.path.dirname(sys.executable)
+            external_path = os.path.join(exe_dir, bin_name)
+            if os.path.exists(external_path):
+                return external_path
+                
+        return bin_name
+
+    def on_closing(self):
+        try:
+            self.temp_dir_obj.cleanup()
+        except:
+            pass
+        self.root.destroy()
     
     def create_widget(self):
         # 動画情報表示ラベル
@@ -57,7 +103,7 @@ class App:
         self.entry_box = tk.Entry(self.root, width=40, state="readonly")
         self.entry_box.place(x=10, y=10)
         
-        self.file_dir_button = tk.Button(self.root, text="mp4参照", command=self.open_file, width=7)
+        self.file_dir_button = tk.Button(self.root, text="動画参照", command=self.open_file, width=7)
         self.file_dir_button.place(x=260, y=10)
 
         self.reset_button = tk.Button(self.root, text="リセット", command=self.reset_file, width=4, bg="orange")
@@ -80,7 +126,7 @@ class App:
         self.scale.place(x=10, y=170)
         self.scale.set(30)
 
-        # --- 進捗バー ---
+        # 進捗バー
         self.progress_label = tk.Label(self.root, text="待機中...")
         self.progress_label.place(x=10, y=220)
         self.progressbar = ttk.Progressbar(self.root, orient="horizontal", length=560, mode="determinate")
@@ -91,10 +137,11 @@ class App:
         self.color_tolerance = int(value)
 
 
+    # 【変更点】mp4以外も対応
     def open_file(self):
         self.entry_box.configure(state="normal")
-        self.idir = "C:\\" 
-        self.file_type=[("MP4", "mp4")]
+        self.idir = os.path.expanduser("~") # 初期位置をホームディレクトリに
+        self.file_type=[("Video Files", "*.mp4;*.mov;*.avi;*.mkv;*.webm;*.flv;*.wmv"), ("All Files", "*.*")]
         self.filename = filedialog.askopenfilename(filetypes=self.file_type, initialdir=self.idir)
         self.entry_box.insert(tk.END, self.filename)
         self.entry_box.config(state="readonly")
@@ -107,37 +154,31 @@ class App:
         self.label_resolusion["text"] = "解像度 -"
         self.label_fps["text"] = "FPS -"
         self.filename = None
+        self.progressbar["value"] = 0
+        self.progress_label["text"] = "リセットしました"
 
 
-    # --- 【追加】ボタンの一括有効/無効化ヘルパー ---
     def set_ui_state(self, state):
-        """
-        state: "normal" or "disabled"
-        処理中にボタン操作を禁止するために使用
-        """
         self.file_dir_button.configure(state=state)
         self.reset_button.configure(state=state)
         self.video_to_image_button.configure(state=state)
         self.set_keyboard_position_button.configure(state=state)
         self.detect_notes_button.configure(state=state)
-        # スライダーも処理中は変更できないほうが安全なため無効化推奨
         self.scale.configure(state=state)
 
 
     # =================================================================================
-    #  動画変換 (Video to Image) 関連メソッド
+    #  動画変換 (Video to Image)
     # =================================================================================
     def start_video_to_image_thread(self):
         if not hasattr(self, 'filename') or not self.filename:
              messagebox.showerror("Error", "ファイルが選択されていません")
              return
 
-        # ボタンを一括無効化
         self.set_ui_state("disabled")
         self.progress_label["text"] = "動画変換の準備中..."
         self.progressbar["value"] = 0
 
-        # スレッド開始
         thread = threading.Thread(target=self.video_to_image_thread_logic)
         thread.daemon = True
         thread.start()
@@ -145,57 +186,67 @@ class App:
 
     def video_to_image_thread_logic(self):
         try:
+            ffmpeg_exe = self.get_ffmpeg_path()
+            ffprobe_exe = self.get_ffprobe_path()
+
+            # ffmpeg-python用パス設定
+            os.environ["PATH"] += os.pathsep + os.path.dirname(ffmpeg_exe)
+
             # 動画情報を取得
             try:
-                self.video_info = ffmpeg.probe(self.filename)
+                self.video_info = ffmpeg.probe(self.filename, cmd=ffprobe_exe)
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", f"動画情報の取得に失敗しました: {e}"))
                 return
 
-            # 動画情報を解析
             duration = 0
             frames = 0
             
             if 'format' in self.video_info and 'duration' in self.video_info['format']:
-                duration = float(self.video_info['format']['duration'])
+                try:
+                    duration = float(self.video_info['format']['duration'])
+                except: pass
 
             for stream in self.video_info['streams']:
                 if stream['codec_type'] == 'video':
                     self.width = stream['width']
                     self.height = stream["height"]
-                    self.fps = stream["avg_frame_rate"]
+                    self.fps = stream.get("avg_frame_rate", "30/1")
                     if 'nb_frames' in stream:
                         try:
                             frames = int(stream['nb_frames'])
                         except: pass
                     break
             
-            self.avg_fps = float(Fraction(self.fps))
+            try:
+                self.avg_fps = float(Fraction(self.fps))
+            except:
+                self.avg_fps = 30.0
             
             if frames == 0 and duration > 0:
                 frames = int(duration * self.avg_fps)
             
             self.total_video_frames = frames
 
-            # UI更新依頼
             self.root.after(0, lambda: self.label_resolusion.config(text=f"解像度: {self.width} x {self.height}"))
             self.root.after(0, lambda: self.label_fps.config(text=f"fps: {self.avg_fps:.2f}"))
 
-            # --- ディレクトリのクリーンアップ ---
-            self.root.after(0, self.update_progress_ui, 0, "古い画像を削除中...")
-            self.check_dir = pathlib.Path(self.images_dir)
-            if self.check_dir.exists():
-                for file in self.check_dir.iterdir():
-                    if file.is_file():
-                        try:
-                            file.unlink()
-                        except PermissionError: pass
-            else:
-                self.check_dir.mkdir(parents=True)
+            # --- 画像保存フォルダの初期化 ---
+            self.root.after(0, self.update_progress_ui, 0, "作業用フォルダを初期化中...")
+            for filename in os.listdir(self.images_dir):
+                file_path = os.path.join(self.images_dir, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                except Exception: pass
 
             # --- 変換実行 ---
             output_pattern = os.path.join(self.images_dir, "%01d.png")
-            ffmpeg_command = f'ffmpeg -i "{self.filename}" -vcodec png "{output_pattern}" -y'
+            cmd = [
+                ffmpeg_exe, '-i', self.filename, '-vcodec', 'png', output_pattern, '-y'
+            ]
             
             self.is_converting_video = True
             self.root.after(500, self.monitor_conversion)
@@ -205,18 +256,21 @@ class App:
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-            subprocess.call(ffmpeg_command, shell=True, startupinfo=startupinfo)
+            ret_code = subprocess.call(cmd, shell=False, startupinfo=startupinfo)
             
             self.is_converting_video = False
-            self.root.after(0, self.update_progress_ui, 100, "変換完了")
-            self.root.after(0, lambda: messagebox.showinfo("infomation", "変換が正常に終了しました"))
+            
+            if ret_code == 0:
+                self.root.after(0, self.update_progress_ui, 100, "変換完了")
+                self.root.after(0, lambda: messagebox.showinfo("infomation", "変換が正常に終了しました"))
+            else:
+                self.root.after(0, lambda: messagebox.showerror("Error", f"変換エラー: コード {ret_code}"))
 
         except Exception as e:
             self.is_converting_video = False
-            self.root.after(0, lambda: messagebox.showerror("Error", f"変換エラー: {e}"))
+            self.root.after(0, lambda: messagebox.showerror("Error", f"変換例外: {e}"))
         finally:
             self.is_converting_video = False
-            # ボタンを一括有効化
             self.root.after(0, lambda: self.set_ui_state("normal"))
 
 
@@ -225,17 +279,14 @@ class App:
             return
 
         try:
-            pathlib_img_dir = pathlib.Path(self.images_dir)
-            current_frames = sum(1 for _ in pathlib_img_dir.glob('*.png'))
+            current_frames = len([name for name in os.listdir(self.images_dir) if name.endswith('.png')])
 
             if self.total_video_frames > 0:
                 progress = (current_frames / self.total_video_frames) * 100
                 if progress > 99: progress = 99
-                
                 self.update_progress_ui(progress, f"動画変換中... {current_frames}/{self.total_video_frames} フレーム")
             else:
                 self.update_progress_ui(0, f"動画変換中... {current_frames} フレーム生成済み")
-
         except Exception:
             pass
         
@@ -244,10 +295,9 @@ class App:
 
 
     # =================================================================================
-    #  MIDI化 (Detect Notes) 関連メソッド
+    #  MIDI化 (Detect Notes)
     # =================================================================================
     def start_detect_notes_thread(self):
-        # ボタンを一括無効化
         self.set_ui_state("disabled")
         self.progress_label["text"] = "画像解析の準備中..."
         self.progressbar["value"] = 0
@@ -263,22 +313,26 @@ class App:
                 self.root.after(0, lambda: messagebox.showerror("Error", "ファイルが選択されていません"))
                 return
             
-            try:
-                self.video_info = ffmpeg.probe(self.filename)
-                for stream in self.video_info['streams']:
-                    if stream['codec_type'] == 'video':
-                        self.width = stream['width']
-                        self.height = stream["height"]
-                        self.fps = stream['avg_frame_rate']
-                        break
-                self.avg_fps = float(Fraction(self.fps))
-            except:
-                self.root.after(0, lambda: messagebox.showerror("Error", "動画情報の取得に失敗しました"))
-                return
+            # FPSの再取得
+            if not hasattr(self, 'avg_fps'):
+                try:
+                    ffprobe_exe = self.get_ffprobe_path()
+                    self.video_info = ffmpeg.probe(self.filename, cmd=ffprobe_exe)
+                    for stream in self.video_info['streams']:
+                        if stream['codec_type'] == 'video':
+                            self.fps = stream.get('avg_frame_rate', "30/1")
+                            break
+                    self.avg_fps = float(Fraction(self.fps))
+                except:
+                    self.root.after(0, lambda: messagebox.showerror("Error", "動画情報の取得に失敗しました。先に動画変換を行ってください。"))
+                    return
             
             if not hasattr(self, "key_positions") or not self.key_positions:
                 self.root.after(0, lambda: messagebox.showerror("error", "座標または色のしきい値が指定されていません"))
                 return
+
+            if not hasattr(self, 'is_two_color_mode'):
+                self.is_two_color_mode = False
 
             if self.is_two_color_mode:
                 self.left_note_states = {key: [] for key in self.key_positions.keys()}
@@ -286,14 +340,13 @@ class App:
             else:
                 self.note_states = {key: [] for key in self.key_positions.keys()}
 
-            pathlib_img_dir = pathlib.Path(self.images_dir)
             files = []
-            if pathlib_img_dir.exists():
-                for f in pathlib_img_dir.iterdir():
-                    if f.is_file() and f.suffix.lower() == '.png':
+            if os.path.exists(self.images_dir):
+                for f in os.listdir(self.images_dir):
+                    if f.lower().endswith('.png'):
                         try:
-                            int(f.stem)
-                            files.append(f.name)
+                            int(os.path.splitext(f)[0])
+                            files.append(f)
                         except ValueError: pass
 
             sorted_files = sorted(files, key=lambda f: int(os.path.splitext(f)[0]))
@@ -306,37 +359,44 @@ class App:
             for i, image_file_name in enumerate(sorted_files):
                 img_path = os.path.join(self.images_dir, image_file_name)
                 try:
-                    img = Image.open(img_path)
-                    rgb_img = img.convert("RGB")
-                    
-                    for key, data in self.key_positions.items():
-                        now_position = data["position"]
-                        r, g, b = rgb_img.getpixel(tuple(now_position))
-
-                        if self.is_two_color_mode:
-                            left_R, left_G, left_B = self.left_color
-                            right_R, right_G, right_B = self.right_color
-
-                            diff_left = (abs(r - left_R) < self.color_tolerance and
-                                         abs(g - left_G) < self.color_tolerance and
-                                         abs(b - left_B) < self.color_tolerance)
+                    with Image.open(img_path) as img:
+                        rgb_img = img.convert("RGB")
+                        
+                        for key, data in self.key_positions.items():
+                            now_position = data["position"]
+                            px, py = int(now_position[0]), int(now_position[1])
                             
-                            diff_right = (abs(r - right_R) < self.color_tolerance and
-                                          abs(g - right_G) < self.color_tolerance and
-                                          abs(b - right_B) < self.color_tolerance)
+                            if px < 0 or py < 0 or px >= rgb_img.width or py >= rgb_img.height:
+                                continue
 
-                            self.left_note_states[key].append(diff_left)
-                            self.right_note_states[key].append(diff_right)
-                        else:
-                            diff = abs((r + g + b) - (data["color"][0] + data["color"][1] + data["color"][2]))
-                            is_pressed = diff > self.color_tolerance
-                            self.note_states[key].append(is_pressed)
+                            r, g, b = rgb_img.getpixel((px, py))
+
+                            if self.is_two_color_mode:
+                                if self.left_color is None or self.right_color is None: continue
+
+                                left_R, left_G, left_B = self.left_color
+                                right_R, right_G, right_B = self.right_color
+
+                                diff_left = (abs(r - left_R) < self.color_tolerance and
+                                             abs(g - left_G) < self.color_tolerance and
+                                             abs(b - left_B) < self.color_tolerance)
+                                
+                                diff_right = (abs(r - right_R) < self.color_tolerance and
+                                              abs(g - right_G) < self.color_tolerance and
+                                              abs(b - right_B) < self.color_tolerance)
+
+                                self.left_note_states[key].append(diff_left)
+                                self.right_note_states[key].append(diff_right)
+                            else:
+                                if data["color"] is None: continue
+                                
+                                diff = abs((r + g + b) - (data["color"][0] + data["color"][1] + data["color"][2]))
+                                is_pressed = diff > self.color_tolerance
+                                self.note_states[key].append(is_pressed)
                     
-                    img.close()
-                except Exception as e:
-                    print(f"Skipped frame {image_file_name} due to error: {e}")
+                except Exception: pass
 
-                if i % 10 == 0:
+                if i % 20 == 0:
                     progress = (i + 1) / total_files * 100
                     self.root.after(0, self.update_progress_ui, progress, f"画像解析中... {i+1}/{total_files} フレーム")
 
@@ -347,9 +407,10 @@ class App:
             self.root.after(0, lambda: messagebox.showinfo("infomation", "MIDI出力に成功しました"))
 
         except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("Error", f"予期せぬエラーが発生しました: {e}"))
+            self.root.after(0, lambda: messagebox.showerror("Error", f"予期せぬエラー: {e}"))
+            import traceback
+            traceback.print_exc()
         finally:
-            # ボタンを一括有効化
             self.root.after(0, lambda: self.set_ui_state("normal"))
 
 
@@ -358,6 +419,7 @@ class App:
         self.progress_label["text"] = text
 
 
+    # 【変更点】保存先ダイアログを追加
     def create_midi(self):
         piano_notes = {
             'A_0': 21, 'A_Sharp_0': 22, 'B_0': 23,
@@ -375,14 +437,20 @@ class App:
         piano_program = pretty_midi.instrument_name_to_program('Acoustic Grand Piano')
         velocity = 100
 
-        if self.is_two_color_mode:
-            left_piano = pretty_midi.Instrument(program=piano_program)
-            right_piano = pretty_midi.Instrument(program=piano_program)
+        # 保存先ダイアログ
+        output_path = filedialog.asksaveasfilename(defaultextension=".mid", filetypes=[("MIDI files", "*.mid")], initialfile="output.mid")
+        if not output_path:
+            return # キャンセル時は何もしない
 
+        if self.is_two_color_mode:
+            left_piano = pretty_midi.Instrument(program=piano_program, name="Left Hand")
+            right_piano = pretty_midi.Instrument(program=piano_program, name="Right Hand")
             all_note_states = {"left": self.left_note_states, "right": self.right_note_states}
 
             for hand, notes_dict in all_note_states.items():
+                target_inst = left_piano if hand == "left" else right_piano
                 for key, states in notes_dict.items():
+                    if key not in piano_notes: continue 
                     is_playing = False
                     start_frame = 0
                     for idx, is_pressed in enumerate(states, start=1):
@@ -395,18 +463,19 @@ class App:
                             start_time = start_frame / self.avg_fps
                             end_time = end_frame / self.avg_fps
                             note = pretty_midi.Note(velocity=velocity, pitch=piano_notes[key], start=start_time, end=end_time)
-                            (left_piano if hand == "left" else right_piano).notes.append(note)
+                            target_inst.notes.append(note)
                     if is_playing:
                         start_time = start_frame / self.avg_fps
                         end_time = (len(states) + 1) / self.avg_fps
                         note = pretty_midi.Note(velocity=velocity, pitch=piano_notes[key], start=start_time, end=end_time)
-                        (left_piano if hand == "left" else right_piano).notes.append(note)
+                        target_inst.notes.append(note)
 
             midi_data.instruments.append(left_piano)
             midi_data.instruments.append(right_piano)
         else:
             piano = pretty_midi.Instrument(program=piano_program)
             for key, states in self.note_states.items():
+                if key not in piano_notes: continue
                 is_playing = False
                 start_frame = 0
                 for idx, is_pressed in enumerate(states, start=1):
@@ -428,15 +497,12 @@ class App:
 
             midi_data.instruments.append(piano)
 
-        output_path = "sample.mid"
         midi_data.write(output_path)
 
 
     def open_Setting_position(self):
         first_img_path = os.path.join(self.images_dir, "1.png")
-        if os.path.exists(first_img_path):
-            pass
-        else:
+        if not os.path.exists(first_img_path):
             messagebox.showerror("error", "画像ファイルが見つかりません。\n動画を画像に変換してください")
             return
 
@@ -447,20 +513,17 @@ class App:
         self.setting_win = Setting_position(self)
 
 
-
 class Setting_position(tk.Toplevel):
     def __init__(self, master):
         super().__init__(master.root)
         self.app  = master 
-        
         self.title("Setting_position")
-        self.geometry("1000x700")
+        self.geometry("950x700")
         self.transient(master.root)
         self.grab_set()
 
         self.key_positions = {}
         self.octave_offset_x = 0
-
         self.canvas_height=450
         self.canvas_width=800
         self.canvas = tk.Canvas(self, bg="lightgray", height=self.canvas_height, width=self.canvas_width, highlightthickness=0, borderwidth=0)
@@ -486,7 +549,6 @@ class Setting_position(tk.Toplevel):
                              int(f.stem)
                              total_frames += 1
                          except: pass
-            
             if total_frames == 0: total_frames = 1
 
             self.scale = tk.Scale(self, from_=1, to=total_frames, orient=tk.HORIZONTAL, length=800, troughcolor="skyblue", command=self.update_image)
@@ -529,24 +591,18 @@ class Setting_position(tk.Toplevel):
     def resize_image(self, image_path):
         try:
             self.image_path = image_path
-            pil_image = Image.open(image_path)
-            image_width, image_height = pil_image.size
-            width_ratio = self.canvas_width / image_width
-            height_ratio = self.canvas_height / image_height
-            self.ratio = min(width_ratio, height_ratio)
-            new_width = int(image_width * self.ratio)
-            new_height = int(image_height * self.ratio)
-            resized_pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            resized_tk_image = ImageTk.PhotoImage(resized_pil_image)
-            pil_image.close()
+            with Image.open(image_path) as pil_image:
+                image_width, image_height = pil_image.size
+                width_ratio = self.canvas_width / image_width
+                height_ratio = self.canvas_height / image_height
+                self.ratio = min(width_ratio, height_ratio)
+                new_width = int(image_width * self.ratio)
+                new_height = int(image_height * self.ratio)
+                resized_pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                resized_tk_image = ImageTk.PhotoImage(resized_pil_image)
             return resized_tk_image, new_width, new_height
-        
-        except FileNotFoundError:
-            messagebox.showerror("error", "画像ファイルが見つかりません。\n動画を画像に変換してください")
-            self.destroy()
-            return None, 0, 0
         except Exception as e:
-            messagebox.showerror("error", f"予期せぬエラーが発生しました({e})")
+            messagebox.showerror("error", f"画像読み込みエラー: {e}")
             self.destroy()
             return None, 0, 0
 
@@ -554,9 +610,10 @@ class Setting_position(tk.Toplevel):
     def update_image(self, val):
         path = os.path.join(self.images_dir, f"{val}.png")
         resized_image, _, _ = self.resize_image(path)
-        self.canvas.itemconfig(self.image_id, image=resized_image)
-        self.canvas.image = resized_image
-        self.canvas.lower(self.image_id)
+        if resized_image:
+            self.canvas.itemconfig(self.image_id, image=resized_image)
+            self.canvas.image = resized_image
+            self.canvas.lower(self.image_id)
 
 
     def add_all_octaves(self):
@@ -570,8 +627,7 @@ class Setting_position(tk.Toplevel):
             self.canvas.itemconfigure(self.B4_box.item, state="hidden")
 
         self.add_keys(octave=4)
-        other_octave = [1, 2, 3, 5, 6, 7]
-        for oct in other_octave:
+        for oct in [1, 2, 3, 5, 6, 7]:
             self.add_keys(octave=oct)
 
 
@@ -611,81 +667,82 @@ class Setting_position(tk.Toplevel):
                 center_y = C_Sharp_y
                 x1 = x - w / 2
                 y1 = center_y - h / 2
-                x2 = x1 + w
-                if 0 <= x1 and x2 <= canvas_width:
-                    self.all_dragable_keys[note] = DraggableRectangle(self.canvas, x1, y1, w, h, "gray")
-                else:
-                    if note in self.all_dragable_keys:
-                        self.canvas.delete(self.all_dragable_keys[note].item)
-                        self.all_dragable_keys.pop(note, None)
             else:
                 w, h = 7, 15
                 center_y = C_y
                 x1 = x - w / 2
                 y1 = center_y - h / 2
-                x2 = x1 + w
-                if 0 <= x1 and x2 <= canvas_width:
-                    self.all_dragable_keys[note] = DraggableRectangle(self.canvas, x1, y1, w, h, "gray")
-                else:
-                    if note in self.all_dragable_keys:
-                        self.canvas.delete(self.all_dragable_keys[note].item)
-                        self.all_dragable_keys.pop(note, None)
+            
+            x2 = x1 + w
+            if 0 <= x1 and x2 <= canvas_width:
+                self.all_dragable_keys[note] = DraggableRectangle(self.canvas, x1, y1, w, h, "gray")
+            else:
+                if note in self.all_dragable_keys:
+                    self.canvas.delete(self.all_dragable_keys[note].item)
+                    self.all_dragable_keys.pop(note, None)
 
 
     def set_threshold(self):
-        if not self.key_positions:
-            messagebox.showerror("error", "座標を確定してください")
+        if not hasattr(self, "all_dragable_keys") or not self.all_dragable_keys:
+            messagebox.showerror("error", "鍵盤を自動追加してください")
             return
         
-        for key in self.key_positions:
-            img=Image.open(self.image_path)
-            rgb_img = img.convert("RGB")
-            x = self.key_positions[key]["position"][0]
-            y = self.key_positions[key]["position"][1]
-            r, g, b = rgb_img.getpixel((x, y))
-            self.key_positions[key]["color"] = [r, g, b]
-            img.close()
-        self.app.key_positions = self.key_positions
-        print(f"座標としきい値が確定されました: {self.app.key_positions}")
+        try:
+            with Image.open(self.image_path) as img:
+                rgb_img = img.convert("RGB")
+                for key in self.all_dragable_keys:
+                    x, y = self.all_dragable_keys[key].get_position()
+                    orig_x = int(x / self.ratio)
+                    orig_y = int(y / self.ratio)
+                    
+                    if 0 <= orig_x < rgb_img.width and 0 <= orig_y < rgb_img.height:
+                        r, g, b = rgb_img.getpixel((orig_x, orig_y))
+                        if key not in self.key_positions:
+                            self.key_positions[key] = {}
+                        self.key_positions[key]["color"] = [r, g, b]
+                        self.key_positions[key]["position"] = [orig_x, orig_y]
 
-        if self.state_is_two_color_mode.get():
-            for key in self.all_dragable_keys:
-                self.all_dragable_keys[key].hide()
-        
-            self.left_block = DraggableRectangle(self.canvas, 30, 30, 7, 15, "orange")
-            self.right_block = DraggableRectangle(self.canvas, 50, 30, 7, 15, "purple")
+            self.app.key_positions = self.key_positions
+            print(f"座標としきい値が確定されました")
 
-            self.color_info_label1.config(text="橙", fg="orange")
-            self.color_info_label2["text"] = ":左手"
-            self.color_info_label3.config(text="紫", fg="purple")
-            self.color_info_label4["text"] = ":右手"
-            self.color_info_label5.config(text="に移動してください", fg="black")
-            self.color_info_label6.place_forget()
-            self.info_label["text"] = "左手と右手の鍵盤が同時に押されてる状態にしてください"
-
-            self.get_two_colors_button = tk.Button(self, text="2つの鍵盤の色を取得して閉じる", bg="coral" ,command=self.get_two_colors)
-            self.get_two_colors_button.place(x=120, y=620)
-        else:
-            self.destroy()
+            if self.state_is_two_color_mode.get():
+                for key in self.all_dragable_keys:
+                    self.all_dragable_keys[key].hide()
+                self.left_block = DraggableRectangle(self.canvas, 30, 30, 7, 15, "orange")
+                self.right_block = DraggableRectangle(self.canvas, 50, 30, 7, 15, "purple")
+                self.color_info_label1.config(text="橙", fg="orange")
+                self.color_info_label2["text"] = ":左手"
+                self.color_info_label3.config(text="紫", fg="purple")
+                self.color_info_label4["text"] = ":右手"
+                self.color_info_label5.config(text="に移動してください", fg="black")
+                self.color_info_label6.place_forget()
+                self.info_label["text"] = "左手と右手の鍵盤が同時に押されてる状態にしてください"
+                self.get_two_colors_button = tk.Button(self, text="2つの鍵盤の色を取得して閉じる", bg="coral" ,command=self.get_two_colors)
+                self.get_two_colors_button.place(x=120, y=620)
+            else:
+                self.destroy()
+        except Exception as e:
+            messagebox.showerror("Error", f"しきい値取得エラー: {e}")
 
     
     def get_two_colors(self):
-        left_position = self.left_block.get_position()
-        right_position = self.right_block.get_position()
-        
-        img=Image.open(self.image_path)
-        rgb_img = img.convert("RGB")
-        r_r, r_g, r_b = rgb_img.getpixel((left_position[0] / self.ratio, left_position[1] / self.ratio))
-        self.left_color = [r_r, r_g, r_b]
-        l_r, l_g, l_b = rgb_img.getpixel((right_position[0] / self.ratio, right_position[1] / self.ratio))
-        self.right_color = [l_r, l_g, l_b]
-
-        self.app.left_color = self.left_color
-        self.app.right_color = self.right_color
-        self.app.is_two_color_mode = self.state_is_two_color_mode.get()
-
-        img.close()
-        self.destroy()
+        try:
+            left_position = self.left_block.get_position()
+            right_position = self.right_block.get_position()
+            with Image.open(self.image_path) as img:
+                rgb_img = img.convert("RGB")
+                lx, ly = int(left_position[0] / self.ratio), int(left_position[1] / self.ratio)
+                rx, ry = int(right_position[0] / self.ratio), int(right_position[1] / self.ratio)
+                r_r, r_g, r_b = rgb_img.getpixel((lx, ly))
+                self.left_color = [r_r, r_g, r_b]
+                l_r, l_g, l_b = rgb_img.getpixel((rx, ry))
+                self.right_color = [l_r, l_g, l_b]
+            self.app.left_color = self.left_color
+            self.app.right_color = self.right_color
+            self.app.is_two_color_mode = self.state_is_two_color_mode.get()
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Error", f"2色取得エラー: {e}")
 
 
     def apply_position(self):
@@ -694,7 +751,10 @@ class Setting_position(tk.Toplevel):
         else:
             for key in self.all_dragable_keys:
                 x, y = self.all_dragable_keys[key].get_position()
-                self.key_positions[key] = {"position": [x / self.ratio, y / self.ratio], "color": None}
+                if key not in self.key_positions:
+                    self.key_positions[key] = {"color": None}
+                self.key_positions[key]["position"] = [x / self.ratio, y / self.ratio]
+            self.app.key_positions = self.key_positions
             apply_position_label = tk.Label(self, text="座標を確定しました", font=2)
             apply_position_label.place(x=20, y=660)
 
@@ -716,16 +776,13 @@ class DraggableRectangle:
     def on_drag(self, event):
         dx = event.x - self.start_x
         dy = event.y - self.start_y
-
         x1, y1, x2, y2 = self.canvas.coords(self.item)
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
-
         if x1 + dx < 0: dx = -x1
         if y1 + dy < 0: dy = -y1
         if x2 + dx > canvas_width: dx = canvas_width - x2
         if y2 + dy > canvas_height: dy = canvas_height - y2
-
         self.canvas.move(self.item, dx, dy)
         self.start_x = event.x
         self.start_y = event.y

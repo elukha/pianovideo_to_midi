@@ -4,3 +4,6 @@ piano2midi/
 piano_to_midi
 midi/
 sample.mid
+ffmpeg.exe
+ffprobe.exe
+exe_folder/
