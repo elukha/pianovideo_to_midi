@@ -103,26 +103,26 @@ class App:
         self.entry_box = tk.Entry(self.root, width=40, state="readonly")
         self.entry_box.place(x=10, y=10)
         
-        self.file_dir_button = tk.Button(self.root, text="動画参照", command=self.open_file, width=7)
+        self.file_dir_button = tk.Button(self.root, text="①動画参照", command=self.open_file, width=9)
         self.file_dir_button.place(x=260, y=10)
 
         self.reset_button = tk.Button(self.root, text="リセット", command=self.reset_file, width=4, bg="orange")
-        self.reset_button.place(x=320, y=10)
+        self.reset_button.place(x=340, y=10)
 
         # 動画から画像に変換ボタン
-        self.video_to_image_button = tk.Button(self.root, text="動画を画像に変換", command=self.start_video_to_image_thread)
+        self.video_to_image_button = tk.Button(self.root, text="②動画を画像に変換", command=self.start_video_to_image_thread)
         self.video_to_image_button.place(x=10, y=50)
         
         # 鍵盤の位置設定ボタン
-        self.set_keyboard_position_button = tk.Button(self.root, text="鍵盤の位置を指定", command=self.open_Setting_position)
+        self.set_keyboard_position_button = tk.Button(self.root, text="③鍵盤の位置を指定", command=self.open_Setting_position)
         self.set_keyboard_position_button.place(x=10, y=90)
 
         # 分析開始ボタン
-        self.detect_notes_button = tk.Button(self.root, text="MIDI化開始", command=self.start_detect_notes_thread)
+        self.detect_notes_button = tk.Button(self.root, text="⑤MIDI化開始", command=self.start_detect_notes_thread)
         self.detect_notes_button.place(x=10, y=130)
 
         # 色の差の許容範囲スライダー
-        self.scale = tk.Scale(self.root, from_=0, to=255, length=400, orient=tk.HORIZONTAL, label="色の差の許容範囲(30を推奨)", command=self.color_tolerance_setting)
+        self.scale = tk.Scale(self.root, from_=0, to=255, length=400, orient=tk.HORIZONTAL, label="④色の差の許容範囲(単色の場合30、2色の場合140程度を推奨)", command=self.color_tolerance_setting)
         self.scale.place(x=10, y=170)
         self.scale.set(30)
 
