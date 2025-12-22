@@ -143,6 +143,7 @@ class App:
         self.idir = os.path.expanduser("~") # 初期位置をホームディレクトリに
         self.file_type=[("Video Files", "*.mp4;*.mov;*.avi;*.mkv;*.webm;*.flv;*.wmv"), ("All Files", "*.*")]
         self.filename = filedialog.askopenfilename(filetypes=self.file_type, initialdir=self.idir)
+        self.entry_box.delete(0, tk.END)
         self.entry_box.insert(tk.END, self.filename)
         self.entry_box.config(state="readonly")
 
