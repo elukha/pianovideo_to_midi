@@ -122,7 +122,7 @@ class App:
         self.detect_notes_button.place(x=10, y=130)
 
         # 色の差の許容範囲スライダー
-        self.scale = tk.Scale(self.root, from_=0, to=255, length=400, orient=tk.HORIZONTAL, label="④色の差の許容範囲(単色の場合30、2色の場合140程度を推奨)", command=self.color_tolerance_setting)
+        self.scale = tk.Scale(self.root, from_=0, to=255, length=400, orient=tk.HORIZONTAL, label="④色の差の許容範囲(単色の場合30、2色の場合100程度を推奨)", command=self.color_tolerance_setting)
         self.scale.place(x=10, y=170)
         self.scale.set(30)
 
