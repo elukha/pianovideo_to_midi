@@ -17,7 +17,7 @@ class App:
     def __init__(self):
         # tkinter初期化
         self.root = tk.Tk()
-        self.root.title("Pianorole to MIDI")
+        self.root.title("Pianorole to MIDI v1.0")
         self.root.geometry("600x300")
 
         # --- 一時ディレクトリの設定 (権限エラー回避・自動削除) ---
