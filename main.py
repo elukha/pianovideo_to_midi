@@ -35,6 +35,7 @@ class App:
         self.is_two_color_mode = False
         self.is_converting_video = False 
         self.total_video_frames = 0      
+        self.current_process = None # 【修正点】外部プロセス管理用変数を追加
         
         self.create_widget()
 
@@ -85,11 +86,32 @@ class App:
         return bin_name
 
     def on_closing(self):
+        # 【修正点】終了処理を全面的に強化
+        
+        # 1. 変換ループなどを停止させるフラグ
+        self.is_converting_video = False
+
+        # 2. 実行中の外部プロセス(ffmpeg)があれば強制終了
+        if self.current_process:
+            try:
+                self.current_process.kill()
+            except:
+                pass
+
+        # 3. ウィンドウを破棄（UIを消す）
+        try:
+            self.root.destroy()
+        except:
+            pass
+
+        # 4. 一時フォルダの掃除（ファイルロックなどで失敗しても無視する）
         try:
             self.temp_dir_obj.cleanup()
         except:
             pass
-        self.root.destroy()
+        
+        # 5. プロセスを強制終了（デーモンスレッドの完全停止）
+        os._exit(0)
     
     def create_widget(self):
         # 動画情報表示ラベル
@@ -257,7 +279,10 @@ class App:
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-            ret_code = subprocess.call(cmd, shell=False, startupinfo=startupinfo)
+            # 【修正点】subprocess.call ではなく Popen を使い、killできるようにする
+            self.current_process = subprocess.Popen(cmd, shell=False, startupinfo=startupinfo)
+            ret_code = self.current_process.wait() # 終了を待機
+            self.current_process = None # 終わったらNoneに
             
             self.is_converting_video = False
             
@@ -265,14 +290,25 @@ class App:
                 self.root.after(0, self.update_progress_ui, 100, "変換完了")
                 self.root.after(0, lambda: messagebox.showinfo("infomation", "変換が正常に終了しました"))
             else:
-                self.root.after(0, lambda: messagebox.showerror("Error", f"変換エラー: コード {ret_code}"))
+                # ユーザーによる中断などでないか確認
+                if ret_code != -9 and ret_code != 1: # -9 is SIGKILL
+                     self.root.after(0, lambda: messagebox.showerror("Error", f"変換エラー: コード {ret_code}"))
 
         except Exception as e:
             self.is_converting_video = False
-            self.root.after(0, lambda: messagebox.showerror("Error", f"変換例外: {e}"))
+            # ウィンドウがまだ存在する場合のみエラー表示
+            try:
+                if self.root.winfo_exists():
+                    self.root.after(0, lambda: messagebox.showerror("Error", f"変換例外: {e}"))
+            except:
+                pass
         finally:
             self.is_converting_video = False
-            self.root.after(0, lambda: self.set_ui_state("normal"))
+            try:
+                if self.root.winfo_exists():
+                    self.root.after(0, lambda: self.set_ui_state("normal"))
+            except:
+                pass
 
 
     def monitor_conversion(self):
@@ -292,7 +328,12 @@ class App:
             pass
         
         if self.is_converting_video:
-            self.root.after(500, self.monitor_conversion)
+            # 終了時にエラーにならないようtryで囲むか、winfo_existsを確認
+            try:
+                if self.root.winfo_exists():
+                    self.root.after(500, self.monitor_conversion)
+            except:
+                pass
 
 
     # =================================================================================
@@ -412,12 +453,18 @@ class App:
             import traceback
             traceback.print_exc()
         finally:
-            self.root.after(0, lambda: self.set_ui_state("normal"))
+            try:
+                if self.root.winfo_exists():
+                    self.root.after(0, lambda: self.set_ui_state("normal"))
+            except: pass
 
 
     def update_progress_ui(self, value, text):
-        self.progressbar["value"] = value
-        self.progress_label["text"] = text
+        try:
+            if self.root.winfo_exists():
+                self.progressbar["value"] = value
+                self.progress_label["text"] = text
+        except: pass
 
 
     # 【変更点】保存先ダイアログを追加
