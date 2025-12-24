@@ -268,7 +268,7 @@ class App:
             self.total_video_frames = frames
             # ========================================================
 
-            self.root.after(0, lambda: self.label_resolusion.config(text=f"解像度: {self.width} x {self.height} (Trial)"))
+            self.root.after(0, lambda: self.label_resolusion.config(text=f"解像度: {self.width} x {self.height}"))
             self.root.after(0, lambda: self.label_fps.config(text=f"fps: {self.avg_fps:.2f}"))
 
             # --- 画像保存フォルダの初期化 ---
